@@ -7,10 +7,10 @@
 #include "datastructure.h"
 #include "pdfpagewidget.h"
 #include "searchwidget.h"
+#include "navigationpanel.h"
 
 class PDFDocumentSession;
 class PDFPageWidget;
-class NavigationPanel;
 class SearchWidget;
 class QScrollArea;
 class QProgressBar;
@@ -62,9 +62,6 @@ public:
     // ==================== 视图操作 ====================
     void setDisplayMode(PageDisplayMode mode);
     void setContinuousScroll(bool continuous);
-    void toggleNavigationPanel();
-    void setNavigationPanelVisible(bool visible);
-    bool isNavigationPanelVisible() const;
 
     // ==================== 搜索操作 ====================
     void showSearchBar();

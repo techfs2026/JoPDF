@@ -7,7 +7,7 @@
 PDFViewHandler::PDFViewHandler(MuPDFRenderer* renderer, QObject* parent)
     : QObject(parent)
     , m_renderer(renderer)
-    , m_currentPage(0)
+    , m_currentPage(-1)
     , m_zoom(DEFAULT_ZOOM)
     , m_zoomMode(ZoomMode::FitWidth)
     , m_displayMode(PageDisplayMode::SinglePage)

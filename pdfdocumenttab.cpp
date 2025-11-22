@@ -46,14 +46,9 @@ void PDFDocumentTab::setupUI()
     // 创建Session
     m_session = new PDFDocumentSession(this);
 
-    // 创建分割器(导航面板 + 内容区域)
-    m_splitter = new QSplitter(Qt::Horizontal, this);
-    m_splitter->setHandleWidth(1);
-    m_splitter->setChildrenCollapsible(false);
-
     // 创建导航面板
     m_navigationPanel = new NavigationPanel(m_session, this);
-    m_navigationPanel->setVisible(true);
+    m_navigationPanel->setVisible(false);
 
     // 创建滚动区域
     m_scrollArea = new QScrollArea(this);
@@ -89,15 +84,9 @@ void PDFDocumentTab::setupUI()
     m_textPreloadProgress->setTextVisible(true);
     m_textPreloadProgress->setAlignment(Qt::AlignCenter);
 
-    // 组装分割器
-    m_splitter->addWidget(m_navigationPanel);
-    m_splitter->addWidget(m_scrollArea);
-    m_splitter->setStretchFactor(0, 0); // 导航面板固定宽度
-    m_splitter->setStretchFactor(1, 1); // 内容区域可拉伸
-
     // 组装主布局
     mainLayout->addWidget(m_searchWidget);
-    mainLayout->addWidget(m_splitter, 1);
+    mainLayout->addWidget(m_scrollArea, 1);
     mainLayout->addWidget(m_textPreloadProgress);
 
     // 设置样式
@@ -304,29 +293,6 @@ void PDFDocumentTab::setContinuousScroll(bool continuous)
     m_pageWidget->setContinuousScroll(continuous);
 }
 
-void PDFDocumentTab::toggleNavigationPanel()
-{
-    bool visible = !m_navigationPanel->isVisible();
-    setNavigationPanelVisible(visible);
-}
-
-void PDFDocumentTab::setNavigationPanelVisible(bool visible)
-{
-    m_navigationPanel->setVisible(visible);
-
-    if (visible && m_session->isDocumentLoaded()) {
-        if (!m_session->contentHandler()->isThumbnailLoading() &&
-            m_session->contentHandler()->loadedThumbnailCount() == 0) {
-            m_session->startLoadThumbnails(120);
-        }
-    }
-}
-
-bool PDFDocumentTab::isNavigationPanelVisible() const
-{
-    return m_navigationPanel && m_navigationPanel->isVisible();
-}
-
 // ==================== 搜索操作 ====================
 
 void PDFDocumentTab::showSearchBar()
@@ -465,7 +431,6 @@ void PDFDocumentTab::onDocumentLoaded(const QString& filePath, int pageCount)
 
     emit documentLoaded(filePath, pageCount);
 }
-
 
 void PDFDocumentTab::onPageChanged(int pageIndex)
 {

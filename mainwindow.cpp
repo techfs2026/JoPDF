@@ -15,10 +15,12 @@
 #include <QApplication>
 #include <QFileInfo>
 #include <QCloseEvent>
+#include <QDockWidget>
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_tabWidget(nullptr)
+    , m_navigationDock(nullptr)
     , m_toolBar(nullptr)
     , m_pageSpinBox(nullptr)
     , m_zoomComboBox(nullptr)
@@ -38,6 +40,12 @@ MainWindow::MainWindow(QWidget* parent)
     m_tabWidget->tabBar()->setExpanding(false);
 
     setCentralWidget(m_tabWidget);
+
+    m_navigationDock = new QDockWidget(tr("Navigation"), this);
+    m_navigationDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_navigationDock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetClosable);
+    addDockWidget(Qt::LeftDockWidgetArea, m_navigationDock);
+    m_navigationDock->setVisible(false);
 
     // 创建UI组件
     createMenuBar();
@@ -227,6 +235,28 @@ void MainWindow::disconnectTabSignals(PDFDocumentTab* tab)
 void MainWindow::onTabChanged(int index)
 {
     Q_UNUSED(index);
+
+    PDFDocumentTab* tab = currentTab();
+
+    // ✅ 简化：只要有 tab 且文档已加载，就显示它的导航面板
+    if (tab && tab->isDocumentLoaded() && tab->navigationPanel()) {
+        m_navigationDock->setWidget(tab->navigationPanel());
+
+        // 保持当前的显示状态（如果用户之前关闭了导航面板，切换 tab 时保持关闭）
+        bool wasVisible = m_navigationDock->isVisible();
+        // 但如果是第一次加载文档，默认显示
+        if (!wasVisible) {
+            // 可以选择：切换到已加载文档的 tab 时，总是显示导航面板
+            // m_navigationDock->setVisible(true);
+        }
+        m_showNavigationAction->setChecked(m_navigationDock->isVisible());
+    } else {
+        // 无文档或无 tab，隐藏导航面板
+        m_navigationDock->setWidget(nullptr);
+        m_navigationDock->setVisible(false);
+        m_showNavigationAction->setChecked(false);
+    }
+
     updateUIState();
     updateWindowTitle();
 }
@@ -353,10 +383,22 @@ void MainWindow::toggleContinuousScroll()
 
 void MainWindow::toggleNavigationPanel()
 {
-    if (PDFDocumentTab* tab = currentTab()) {
-        tab->toggleNavigationPanel();
-        m_showNavigationAction->setChecked(tab->isNavigationPanelVisible());
+    PDFDocumentTab* tab = currentTab();
+    if (!tab || !tab->isDocumentLoaded()) {
+        return;
     }
+
+    bool visible = !m_navigationDock->isVisible();
+
+    // ✅ 显示前确保设置了正确的 widget
+    if (visible) {
+        if (m_navigationDock->widget() != tab->navigationPanel()) {
+            m_navigationDock->setWidget(tab->navigationPanel());
+        }
+    }
+
+    m_navigationDock->setVisible(visible);
+    m_showNavigationAction->setChecked(visible);
 }
 
 void MainWindow::toggleLinksVisible()
@@ -488,23 +530,32 @@ void MainWindow::onCurrentTabTextSelectionChanged()
 
 void MainWindow::onCurrentTabDocumentLoaded(const QString& filePath, int pageCount)
 {
+    Q_UNUSED(filePath);
     Q_UNUSED(pageCount);
 
-    PDFDocumentTab* sender = qobject_cast<PDFDocumentTab*>(QObject::sender());
-    if (!sender) {
+    PDFDocumentTab* tab = qobject_cast<PDFDocumentTab*>(QObject::sender());
+    if (!tab) {
         return;
     }
 
     // 更新标签页标题
-    int index = m_tabWidget->indexOf(sender);
+    int index = m_tabWidget->indexOf(tab);
     if (index >= 0) {
         updateTabTitle(index);
     }
 
-    // 如果是当前标签页,更新UI
-    if (sender == currentTab()) {
+    // 如果是当前标签页，更新UI
+    if (tab == currentTab()) {
         updateWindowTitle();
         updateUIState();
+
+        // ✅ 显示导航面板（文档加载后默认显示）
+        if (tab->navigationPanel()) {
+            m_navigationDock->setWidget(tab->navigationPanel());
+            m_navigationDock->setVisible(true);
+            m_showNavigationAction->setChecked(true);
+
+        }
     }
 }
 

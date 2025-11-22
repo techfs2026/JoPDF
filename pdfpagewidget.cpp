@@ -108,7 +108,7 @@ void PDFPageWidget::onPageChangedFromHandler(int pageIndex)
     // 触发渲染
     renderCurrentPage();
 
-    // 转发信号给外部(MainWindow)
+    // 转发信号给外部
     emit pageChanged(pageIndex);
 }
 

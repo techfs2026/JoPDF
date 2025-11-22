@@ -66,6 +66,7 @@ public:
     void refresh();
     QSize sizeHint() const override;
     QString getCacheStatistics() const;
+    void renderCurrentPage();
 
     // 交互功能(委托)
     void setLinksVisible(bool enabled);
@@ -96,7 +97,6 @@ private slots:
     void onDisplayModeChanged(PageDisplayMode mode);
 
 private:
-    void renderCurrentPage();
     QImage renderSinglePage(int pageIndex, double zoom);
     void renderVisiblePages(const QRect& visibleRect);
 

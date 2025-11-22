@@ -17,7 +17,7 @@
 #include <QDebug>
 
 NavigationPanel::NavigationPanel(PDFDocumentSession* session, QWidget* parent)
-    : QDockWidget(tr("Navigation"), parent)
+    : QWidget(parent)
     , m_session(session)
     , m_tabWidget(nullptr)
     , m_outlineWidget(nullptr)
@@ -29,9 +29,6 @@ NavigationPanel::NavigationPanel(PDFDocumentSession* session, QWidget* parent)
         qCritical() << "NavigationPanel: session is null!";
         return;
     }
-
-    setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
-    setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetClosable);
 
     setupUI();
     setupConnections();
@@ -98,8 +95,7 @@ void NavigationPanel::setThumbnail(int pageIndex, const QImage& thumbnail)
 void NavigationPanel::setupUI()
 {
     // 创建主容器
-    QWidget* mainWidget = new QWidget(this);
-    QVBoxLayout* mainLayout = new QVBoxLayout(mainWidget);
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
@@ -173,8 +169,6 @@ void NavigationPanel::setupUI()
     // 添加到主布局
     mainLayout->addWidget(m_tabWidget, 1);
 
-    mainWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
-
     // 应用样式
     QString style = R"(
         /* 标签页样式 */
@@ -240,25 +234,10 @@ void NavigationPanel::setupUI()
         }
     )";
 
-    mainWidget->setStyleSheet(style);
-    setWidget(mainWidget);
+    setStyleSheet(style);
 
     setMinimumWidth(180);
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
-
-    // 设置停靠窗口标题栏样式
-    setStyleSheet(R"(
-        QDockWidget {
-            titlebar-close-icon: url(close.png);
-            titlebar-normal-icon: url(float.png);
-        }
-
-        QDockWidget::title {
-            background-color: #F5F5F7;
-            padding: 8px;
-            border-bottom: 1px solid #E8E8E8;
-        }
-    )");
 }
 
 void NavigationPanel::setupConnections()
@@ -346,12 +325,9 @@ void NavigationPanel::setupConnections()
 
 void NavigationPanel::resizeEvent(QResizeEvent* event)
 {
-    QDockWidget::resizeEvent(event);
+    QWidget::resizeEvent(event);
 
-    // 强制更新布局
-    if (widget()) {
-        widget()->updateGeometry();
-    }
+    updateGeometry();
 
     if (m_tabWidget) {
         m_tabWidget->updateGeometry();

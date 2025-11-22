@@ -1,7 +1,7 @@
 #ifndef NAVIGATIONPANEL_H
 #define NAVIGATIONPANEL_H
 
-#include <QDockWidget>
+#include <QWidget>
 
 // Forward declarations
 class PDFDocumentSession;  // 新增:从Session获取所有组件
@@ -11,7 +11,7 @@ class QTabWidget;
 class QToolButton;
 class QImage;
 
-class NavigationPanel : public QDockWidget
+class NavigationPanel : public QWidget
 {
     Q_OBJECT
 

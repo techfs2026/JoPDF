@@ -108,6 +108,7 @@ private:
 private:
     // ========== 核心组件 ==========
     QTabWidget* m_tabWidget;
+    QDockWidget* m_navigationDock;
 
     // ========== UI组件 ==========
     QToolBar* m_toolBar;
