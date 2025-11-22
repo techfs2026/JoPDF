@@ -57,7 +57,7 @@ public:
     void setRotation(int rotation);
 
     // 显示模式
-    PageDisplayMode displayMode() const;
+    PageDisplayMode displayMode() const {return m_viewHandler? m_viewHandler->displayMode(): PageDisplayMode::SinglePage;}
     void setDisplayMode(PageDisplayMode mode);
     bool isContinuousScroll() const {return m_viewHandler->isContinuousScroll();};
     void setContinuousScroll(bool continuous);

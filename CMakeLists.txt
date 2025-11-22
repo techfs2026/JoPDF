@@ -94,6 +94,8 @@ set(SOURCES
     pdfpagewidget.h
     navigationpanel.cpp
     navigationpanel.h
+    pdfdocumenttab.cpp
+    pdfdocumenttab.h
 
 
     pagecachemanager.cpp

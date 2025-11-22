@@ -3,22 +3,25 @@
 
 #include <QMainWindow>
 #include <QTimer>
+#include "datastructure.h"
 
-// Forward declarations
-class PDFDocumentSession;  // 新增:替代所有零散组件
-class PDFPageWidget;
-class NavigationPanel;
-class SearchWidget;
-class QScrollArea;
+class PDFDocumentTab;
+class QTabWidget;
 class QToolBar;
 class QSpinBox;
 class QComboBox;
 class QLabel;
-class QProgressBar;
 class QAction;
 
-enum class PageDisplayMode;
-
+/**
+ * @brief 主窗口 - 多标签页PDF查看器
+ *
+ * 职责:
+ * - 管理多个PDF文档标签页
+ * - 全局菜单栏、工具栏、状态栏
+ * - 根据当前活动标签页更新UI状态
+ * - 转发用户操作到当前标签页
+ */
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -27,102 +30,107 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
 
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+    void closeEvent(QCloseEvent* event) override;
+
 private slots:
-    // 文件操作
+    // ========== 文件操作 ==========
     void openFile();
-    void closeFile();
+    void openFileInNewTab();
+    void closeCurrentTab();
+    void closeTab(int index);
     void quit();
 
-    // 页面导航
+    // ========== 标签页管理 ==========
+    void onTabChanged(int index);
+    void onTabCloseRequested(int index);
+    void updateTabTitle(int index);
+
+    // ========== 页面导航 ==========
     void previousPage();
     void nextPage();
     void firstPage();
     void lastPage();
     void goToPage(int page);
 
-    // 缩放操作
+    // ========== 缩放操作 ==========
     void zoomIn();
     void zoomOut();
     void actualSize();
     void fitPage();
     void fitWidth();
+    void onZoomComboChanged(const QString& text);
 
-    // 视图操作
+    // ========== 视图操作 ==========
     void togglePageMode(PageDisplayMode mode);
     void toggleContinuousScroll();
-
-    // 事件响应
-    void onPageChanged(int pageIndex);
-    void onZoomChanged(double zoom);
-
-    // 搜索
-    void showSearchBar();
-    void hideSearchBar();
-
-    // 文本预加载
-    void onTextPreloadProgress(int current, int total);
-    void onTextPreloadCompleted();
-
-    // 导航面板
     void toggleNavigationPanel();
-
-    // 链接
     void toggleLinksVisible();
 
-    // 文本选择
-    void copySelectedText();
-    void onTextSelectionChanged();
+    // ========== 搜索操作 ==========
+    void showSearchBar();
+    void findNext();
+    void findPrevious();
 
-protected:
-    void resizeEvent(QResizeEvent* event) override;
-    void closeEvent(QCloseEvent* event) override;
-    bool eventFilter(QObject* obj, QEvent* event) override;
+    // ========== 文本操作 ==========
+    void copySelectedText();
+
+    // ========== 事件响应 ==========
+    void onCurrentTabPageChanged(int pageIndex);
+    void onCurrentTabZoomChanged(double zoom);
+    void onCurrentTabDisplayModeChanged(PageDisplayMode mode);
+    void onCurrentTabContinuousScrollChanged(bool continuous);
+    void onCurrentTabTextSelectionChanged();
+    void onCurrentTabDocumentLoaded(const QString& filePath, int pageCount);
+    void onCurrentTabDocumentClosed();
+    void onCurrentTabSearchCompleted(const QString& query, int totalMatches);
 
 private:
+    // ========== UI创建 ==========
     void createMenuBar();
     void createToolBar();
     void createStatusBar();
     void setupConnections();
 
+    // ========== 状态管理 ==========
     void updateUIState();
     void updateWindowTitle();
     void updateStatusBar();
-    void updateScrollBarPolicy();
-
-    void applyInitialSettings();
     void applyModernStyle();
-    void loadLastSession();
-    void saveCurrentSession();
+
+    // ========== 标签页操作 ==========
+    PDFDocumentTab* currentTab() const;
+    PDFDocumentTab* createNewTab();
+    void connectTabSignals(PDFDocumentTab* tab);
+    void disconnectTabSignals(PDFDocumentTab* tab);
 
 private:
-    // 核心组件(替代原来的多个组件)
-    PDFDocumentSession* m_session;  // 唯一的核心组件
+    // ========== 核心组件 ==========
+    QTabWidget* m_tabWidget;
 
-    // UI组件
-    PDFPageWidget* m_pageWidget;
-    QScrollArea* m_scrollArea;
-    SearchWidget* m_searchWidget;
-    NavigationPanel* m_navigationPanel;
-
-    // 工具栏组件
+    // ========== UI组件 ==========
     QToolBar* m_toolBar;
     QSpinBox* m_pageSpinBox;
     QComboBox* m_zoomComboBox;
-
-    // 状态栏组件
     QLabel* m_statusLabel;
     QLabel* m_pageLabel;
     QLabel* m_zoomLabel;
-    QProgressBar* m_textPreloadProgress;
 
-    // 菜单/工具栏动作
+    // ========== Actions ==========
+    // 文件菜单
     QAction* m_openAction;
+    QAction* m_openInNewTabAction;
     QAction* m_closeAction;
     QAction* m_quitAction;
+
+    // 编辑菜单
     QAction* m_copyAction;
     QAction* m_findAction;
     QAction* m_findNextAction;
     QAction* m_findPreviousAction;
+
+    // 视图菜单
     QAction* m_zoomInAction;
     QAction* m_zoomOutAction;
     QAction* m_actualSizeAction;
@@ -133,12 +141,14 @@ private:
     QAction* m_continuousScrollAction;
     QAction* m_showNavigationAction;
     QAction* m_showLinksAction;
+
+    // 导航菜单
     QAction* m_firstPageAction;
     QAction* m_previousPageAction;
     QAction* m_nextPageAction;
     QAction* m_lastPageAction;
 
-    // 防抖定时器
+    // ========== 工具 ==========
     QTimer m_resizeDebounceTimer;
 };
 
