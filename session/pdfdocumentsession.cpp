@@ -523,6 +523,11 @@ void PDFDocumentSession::setupConnections()
                 this, [this](int newPageIndex) {
                     m_state->setCurrentPage(newPageIndex);
                     updateCacheAfterStateChange();
+                    if(m_state->isContinuousScroll()) {
+                        int targetY = m_viewHandler->getScrollPositionForPage(
+                            newPageIndex, AppConfig::PAGE_MARGIN, m_state->pageYPositions());
+                        emit scrollToPositionRequested(targetY);
+                    }
                 });
 
         // 缩放设置完成 -> 更新State
