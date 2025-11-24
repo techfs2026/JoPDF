@@ -76,7 +76,8 @@ void PDFContentHandler::closeDocument()
 
     // 取消正在进行的操作
     if (m_thumbnailManager) {
-        m_thumbnailManager->cancelLoading();
+        m_thumbnailManager->cancelAllTasks();
+        m_thumbnailManager->waitForCompletion();
     }
 
     // 清空数据
@@ -158,58 +159,79 @@ void PDFContentHandler::clearOutline()
     }
 }
 
-// ========== 缩略图管理 ==========
+// ========== 缩略图管理 (新版智能管理器) ==========
 
-void PDFContentHandler::startLoadThumbnails(int thumbnailWidth)
-{
-    if (!isDocumentLoaded()) {
-        qWarning() << "PDFContentHandler: Cannot load thumbnails - no document loaded";
-        return;
-    }
-
-    if (!m_thumbnailManager) {
-        qWarning() << "PDFContentHandler: Thumbnail manager not initialized";
-        return;
-    }
-
-    m_thumbnailManager->startLoading(pageCount(), thumbnailWidth);
-}
-
-void PDFContentHandler::cancelThumbnailLoading()
-{
-    if (m_thumbnailManager) {
-        m_thumbnailManager->cancelLoading();
-    }
-}
-
-QImage PDFContentHandler::getThumbnail(int pageIndex) const
+QImage PDFContentHandler::getThumbnail(int pageIndex, bool preferHighRes) const
 {
     if (!m_thumbnailManager) {
         return QImage();
     }
-    return m_thumbnailManager->getThumbnail(pageIndex);
+    return m_thumbnailManager->getThumbnail(pageIndex, preferHighRes);
 }
 
-bool PDFContentHandler::isThumbnailLoading() const
+bool PDFContentHandler::hasThumbnail(int pageIndex) const
 {
     if (!m_thumbnailManager) {
         return false;
     }
-    return m_thumbnailManager->isLoading();
+    return m_thumbnailManager->hasThumbnail(pageIndex);
 }
 
-int PDFContentHandler::loadedThumbnailCount() const
-{
-    if (!m_thumbnailManager) {
-        return 0;
-    }
-    return m_thumbnailManager->loadedCount();
-}
-
-void PDFContentHandler::setThumbnailSize(int width)
+void PDFContentHandler::setThumbnailSize(int lowResWidth, int highResWidth)
 {
     if (m_thumbnailManager) {
-        m_thumbnailManager->setThumbnailWidth(width);
+        m_thumbnailManager->setLowResWidth(lowResWidth);
+        m_thumbnailManager->setHighResWidth(highResWidth);
+    }
+}
+
+void PDFContentHandler::setThumbnailRotation(int rotation)
+{
+    if (m_thumbnailManager) {
+        m_thumbnailManager->setRotation(rotation);
+    }
+}
+
+void PDFContentHandler::renderLowResImmediate(const QVector<int>& pageIndices)
+{
+    if (m_thumbnailManager) {
+        m_thumbnailManager->renderLowResImmediate(pageIndices);
+    }
+}
+
+void PDFContentHandler::renderHighResAsync(const QVector<int>& pageIndices, int priority)
+{
+    if (m_thumbnailManager) {
+        RenderPriority renderPriority = RenderPriority::MEDIUM;
+        switch (priority) {
+        case 3:
+            renderPriority = RenderPriority::IMMEDIATE;
+            break;
+        case 2:
+            renderPriority = RenderPriority::HIGH;
+            break;
+        case 1:
+            renderPriority = RenderPriority::MEDIUM;
+            break;
+        case 0:
+            renderPriority = RenderPriority::LOW;
+            break;
+        }
+        m_thumbnailManager->renderHighResAsync(pageIndices, renderPriority);
+    }
+}
+
+void PDFContentHandler::renderLowResAsync(const QVector<int>& pageIndices)
+{
+    if (m_thumbnailManager) {
+        m_thumbnailManager->renderLowResAsync(pageIndices);
+    }
+}
+
+void PDFContentHandler::cancelThumbnailTasks()
+{
+    if (m_thumbnailManager) {
+        m_thumbnailManager->cancelAllTasks();
     }
 }
 
@@ -218,6 +240,16 @@ void PDFContentHandler::clearThumbnails()
     if (m_thumbnailManager) {
         m_thumbnailManager->clear();
     }
+}
+
+QString PDFContentHandler::getThumbnailStatistics() const
+{
+    return m_thumbnailManager ? m_thumbnailManager->getStatistics() : QString();
+}
+
+int PDFContentHandler::cachedThumbnailCount() const
+{
+    return m_thumbnailManager ? m_thumbnailManager->cachedCount() : 0;
 }
 
 // ========== 工具方法 ==========
@@ -247,28 +279,23 @@ void PDFContentHandler::setupConnections()
 
     // 连接 ThumbnailManager 信号
     if (m_thumbnailManager) {
-        connect(m_thumbnailManager.get(), &ThumbnailManager::loadStarted,
-                this, &PDFContentHandler::thumbnailLoadStarted);
+        connect(m_thumbnailManager.get(), &ThumbnailManager::thumbnailLoaded,
+                this, &PDFContentHandler::thumbnailLoaded);
 
         connect(m_thumbnailManager.get(), &ThumbnailManager::loadProgress,
                 this, &PDFContentHandler::thumbnailLoadProgress);
-
-        connect(m_thumbnailManager.get(), &ThumbnailManager::thumbnailReady,
-                this, &PDFContentHandler::thumbnailReady);
-
-        connect(m_thumbnailManager.get(), &ThumbnailManager::loadCompleted,
-                this, &PDFContentHandler::thumbnailLoadCompleted);
-
-        connect(m_thumbnailManager.get(), &ThumbnailManager::loadCancelled,
-                this, &PDFContentHandler::thumbnailLoadCancelled);
     }
 
-    connect(m_outlineEditor.get(), &OutlineEditor::outlineModified,
-            this, &PDFContentHandler::outlineModified);
-    connect(m_outlineEditor.get(), &OutlineEditor::saveCompleted,
-            this, &PDFContentHandler::outlineSaveCompleted);
+    // 连接 OutlineEditor 信号
+    if (m_outlineEditor) {
+        connect(m_outlineEditor.get(), &OutlineEditor::outlineModified,
+                this, &PDFContentHandler::outlineModified);
+        connect(m_outlineEditor.get(), &OutlineEditor::saveCompleted,
+                this, &PDFContentHandler::outlineSaveCompleted);
+    }
 }
 
+// ========== 大纲编辑 ==========
 
 OutlineItem* PDFContentHandler::addOutlineItem(OutlineItem* parent,
                                                const QString& title,

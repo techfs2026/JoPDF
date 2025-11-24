@@ -1,365 +1,305 @@
 #include "thumbnailmanager.h"
+#include "thumbnailcache.h"
+#include "threadsaferenderer.h"
 #include "mupdfrenderer.h"
 #include <QDebug>
 #include <QMutexLocker>
-#include <QRunnable>
-#include <QMetaObject>
-#include <QThread>
-
-// ========== 缩略图加载任务 ==========
-
-class ThumbnailTask : public QRunnable
-{
-public:
-    ThumbnailTask(ThumbnailManager* manager,
-                  const QString& pdfPath,
-                  int pageIndex,
-                  int thumbnailWidth,
-                  QAtomicInt* cancelFlag)
-        : m_manager(manager)
-        , m_pdfPath(pdfPath)
-        , m_pageIndex(pageIndex)
-        , m_thumbnailWidth(thumbnailWidth)
-        , m_cancelFlag(cancelFlag)
-    {
-        setAutoDelete(true);
-    }
-
-    void run() override
-    {
-        // 取消检查点 1
-        if (m_cancelFlag->loadAcquire()) {
-            QMetaObject::invokeMethod(m_manager, "handleTaskDone",
-                                      Qt::QueuedConnection,
-                                      Q_ARG(int, m_pageIndex),
-                                      Q_ARG(QImage, QImage()),
-                                      Q_ARG(bool, false));
-            return;
-        }
-
-        // 每个线程共享 renderer，避免重复 loadDocument
-        static thread_local MuPDFRenderer renderer;
-        static thread_local QString loadedPath;
-
-        // 如果文档路径不同，需要重新加载
-        if (loadedPath != m_pdfPath) {
-            QString error;
-            if (!renderer.loadDocument(m_pdfPath, &error)) {
-                QMetaObject::invokeMethod(m_manager, "handleTaskDone",
-                                          Qt::QueuedConnection,
-                                          Q_ARG(int, m_pageIndex),
-                                          Q_ARG(QImage, QImage()),
-                                          Q_ARG(bool, false));
-                return;
-            }
-            loadedPath = m_pdfPath;
-        }
-
-        // 取消检查点 2
-        if (m_cancelFlag->loadAcquire()) {
-            QMetaObject::invokeMethod(m_manager, "handleTaskDone",
-                                      Qt::QueuedConnection,
-                                      Q_ARG(int, m_pageIndex),
-                                      Q_ARG(QImage, QImage()),
-                                      Q_ARG(bool, false));
-            return;
-        }
-
-        // 获取页面尺寸
-        QSizeF pageSize = renderer.pageSize(m_pageIndex);
-        if (pageSize.isEmpty()) {
-            QMetaObject::invokeMethod(m_manager, "handleTaskDone",
-                                      Qt::QueuedConnection,
-                                      Q_ARG(int, m_pageIndex),
-                                      Q_ARG(QImage, QImage()),
-                                      Q_ARG(bool, false));
-            return;
-        }
-
-        // 计算缩放比例
-        double scale = double(m_thumbnailWidth) / pageSize.width();
-
-        // 取消检查点 3
-        if (m_cancelFlag->loadAcquire()) {
-            QMetaObject::invokeMethod(m_manager, "handleTaskDone",
-                                      Qt::QueuedConnection,
-                                      Q_ARG(int, m_pageIndex),
-                                      Q_ARG(QImage, QImage()),
-                                      Q_ARG(bool, false));
-            return;
-        }
-
-        // 渲染缩略图
-        auto result = renderer.renderPage(m_pageIndex, scale, 0);
-
-        // 最后取消检查
-        if (m_cancelFlag->loadAcquire()) {
-            QMetaObject::invokeMethod(m_manager, "handleTaskDone",
-                                      Qt::QueuedConnection,
-                                      Q_ARG(int, m_pageIndex),
-                                      Q_ARG(QImage, QImage()),
-                                      Q_ARG(bool, false));
-            return;
-        }
-
-        // 返回结果
-        QMetaObject::invokeMethod(m_manager, "handleTaskDone",
-                                  Qt::QueuedConnection,
-                                  Q_ARG(int, m_pageIndex),
-                                  Q_ARG(QImage, result.success ? result.image : QImage()),
-                                  Q_ARG(bool, result.success));
-    }
-
-private:
-    ThumbnailManager* m_manager;
-    QString m_pdfPath;
-    int m_pageIndex;
-    int m_thumbnailWidth;
-    QAtomicInt* m_cancelFlag;
-};
-
-// ========== ThumbnailManager 实现 ==========
+#include <QElapsedTimer>
 
 ThumbnailManager::ThumbnailManager(MuPDFRenderer* renderer, QObject* parent)
     : QObject(parent)
     , m_renderer(renderer)
-    , m_thumbnailWidth(DEFAULT_THUMBNAIL_WIDTH)
-    , m_totalPages(0)
+    , m_cache(std::make_unique<ThumbnailCache>())
+    , m_threadPool(std::make_unique<QThreadPool>())
+    , m_lowResWidth(40)
+    , m_highResWidth(120)
+    , m_rotation(0)
 {
-    m_isLoading.storeRelease(0);
-    m_cancelRequested.storeRelease(0);
-    m_loadedCount.storeRelease(0);
-    m_activeTasks.storeRelease(0);
+    // 配置线程池
+    m_threadPool->setMaxThreadCount(3);  // 最多 3 个渲染线程
+    m_threadPool->setExpiryTimeout(30000);  // 30s 后回收空闲线程
+
+    qInfo() << "ThumbnailManager: Initialized with"
+            << m_threadPool->maxThreadCount() << "threads";
 }
 
 ThumbnailManager::~ThumbnailManager()
 {
-    cancelLoading();
-    m_threadPool.waitForDone(3000);
-    clear();
+    cancelAllTasks();
+    m_threadPool->waitForDone();
 }
 
-void ThumbnailManager::startLoading(int pageCount, int thumbnailWidth)
+// ========== 配置 ==========
+
+void ThumbnailManager::setLowResWidth(int width)
 {
-    if (!m_renderer || pageCount <= 0) {
-        qWarning() << "ThumbnailManager: Invalid parameters for loading";
+    if (width < 20 || width > 100) {
+        qWarning() << "ThumbnailManager: Invalid low-res width:" << width;
         return;
     }
-
-    // 如果已有正在进行的加载，先取消
-    if (m_isLoading.loadAcquire()) {
-        cancelLoading();
-
-        // 短暂等待
-        for (int i = 0; i < 30 && m_isLoading.loadAcquire(); ++i) {
-            QThread::msleep(50);
-        }
-    }
-
-    // 获取文档路径
-    QString docPath;
-    try {
-        docPath = m_renderer->documentPath();
-    } catch (...) {
-        qWarning() << "ThumbnailManager: Failed to get document path";
-        return;
-    }
-
-    if (docPath.isEmpty()) {
-        qWarning() << "ThumbnailManager: Empty document path";
-        return;
-    }
-
-    // 清空旧数据
-    {
-        QMutexLocker locker(&m_cacheMutex);
-        m_thumbnailCache.clear();
-    }
-
-    {
-        QMutexLocker locker(&m_queueMutex);
-        m_pendingPages.clear();
-        m_pendingPages.reserve(pageCount);
-        for (int i = 0; i < pageCount; ++i) {
-            m_pendingPages.append(i);
-        }
-    }
-
-    // 设置状态
-    m_thumbnailWidth = thumbnailWidth;
-    m_totalPages = pageCount;
-    m_isLoading.storeRelease(1);
-    m_cancelRequested.storeRelease(0);
-    m_loadedCount.storeRelease(0);
-    m_activeTasks.storeRelease(0);
-
-    // 设置线程池
-    m_threadPool.setMaxThreadCount(maxConcurrency());
-
-    qInfo() << "ThumbnailManager: Start loading" << pageCount
-            << "thumbnails, width:" << thumbnailWidth
-            << "concurrency:" << maxConcurrency();
-
-    emit loadStarted(pageCount);
-
-    // 启动异步加载
-    startAsyncLoading();
+    m_lowResWidth = width;
 }
 
-void ThumbnailManager::cancelLoading()
-{
-    if (!m_isLoading.loadAcquire()) {
-        return;
-    }
-
-    m_cancelRequested.storeRelease(1);
-    qInfo() << "ThumbnailManager: Cancel requested";
-}
-
-QImage ThumbnailManager::getThumbnail(int pageIndex) const
-{
-    QMutexLocker locker(&m_cacheMutex);
-    return m_thumbnailCache.value(pageIndex, QImage());
-}
-
-bool ThumbnailManager::isLoading() const
-{
-    return m_isLoading.loadAcquire() != 0;
-}
-
-int ThumbnailManager::loadedCount() const
-{
-    return m_loadedCount.loadAcquire();
-}
-
-void ThumbnailManager::setThumbnailWidth(int width)
+void ThumbnailManager::setHighResWidth(int width)
 {
     if (width < 80 || width > 400) {
-        qWarning() << "ThumbnailManager: Invalid width:" << width;
+        qWarning() << "ThumbnailManager: Invalid high-res width:" << width;
+        return;
+    }
+    m_highResWidth = width;
+}
+
+void ThumbnailManager::setRotation(int rotation)
+{
+    m_rotation = rotation;
+}
+
+// ========== 获取缩略图 ==========
+
+QImage ThumbnailManager::getThumbnail(int pageIndex, bool preferHighRes)
+{
+    if (preferHighRes) {
+        // 优先返回高清
+        QImage highRes = m_cache->getHighRes(pageIndex);
+        if (!highRes.isNull()) {
+            return highRes;
+        }
+
+        // 高清不存在,返回低清
+        return m_cache->getLowRes(pageIndex);
+    } else {
+        // 只返回低清
+        return m_cache->getLowRes(pageIndex);
+    }
+}
+
+bool ThumbnailManager::hasThumbnail(int pageIndex) const
+{
+    return m_cache->hasLowRes(pageIndex) || m_cache->hasHighRes(pageIndex);
+}
+
+// ========== 渲染请求 ==========
+
+void ThumbnailManager::renderLowResImmediate(const QVector<int>& pageIndices)
+{
+    if (!m_renderer || pageIndices.isEmpty()) {
         return;
     }
 
-    m_thumbnailWidth = width;
+    qDebug() << "ThumbnailManager: Rendering" << pageIndices.size()
+             << "low-res thumbnails immediately (UI thread)";
+
+    QElapsedTimer timer;
+    timer.start();
+
+    int rendered = 0;
+    for (int pageIndex : pageIndices) {
+        // 跳过已缓存的
+        if (m_cache->hasLowRes(pageIndex)) {
+            continue;
+        }
+
+        // 计算缩放比例
+        QSizeF pageSize = m_renderer->pageSize(pageIndex);
+        if (pageSize.isEmpty()) {
+            continue;
+        }
+
+        double zoom = m_lowResWidth / pageSize.width();
+
+        // 同步渲染(使用 UI 线程的 renderer)
+        MuPDFRenderer::RenderResult result = m_renderer->renderPage(pageIndex, zoom, m_rotation);
+
+        if (result.success && !result.image.isNull()) {
+            m_cache->setLowRes(pageIndex, result.image);
+            emit thumbnailLoaded(pageIndex, result.image, false);
+            rendered++;
+        }
+    }
+
+    qint64 elapsed = timer.elapsed();
+    qDebug() << "ThumbnailManager: Rendered" << rendered
+             << "low-res thumbnails in" << elapsed << "ms"
+             << "(" << (rendered > 0 ? elapsed / rendered : 0) << "ms/page)";
 }
+
+void ThumbnailManager::renderHighResAsync(const QVector<int>& pageIndices,
+                                          RenderPriority priority)
+{
+    if (!m_renderer || pageIndices.isEmpty()) {
+        return;
+    }
+
+    // 创建线程安全渲染器(如果还没有)
+    if (!m_threadSafeRenderer) {
+        QString docPath = m_renderer->currentFilePath();
+        if (docPath.isEmpty()) {
+            qWarning() << "ThumbnailManager: No document loaded";
+            return;
+        }
+        m_threadSafeRenderer = std::make_unique<ThreadSafeRenderer>(docPath);
+        if (!m_threadSafeRenderer->isValid()) {
+            qCritical() << "ThumbnailManager: Failed to create thread-safe renderer";
+            m_threadSafeRenderer.reset();
+            return;
+        }
+    }
+
+    // 过滤已缓存的页面
+    QVector<int> toRender;
+    for (int pageIndex : pageIndices) {
+        if (!m_cache->hasHighRes(pageIndex)) {
+            toRender.append(pageIndex);
+        }
+    }
+
+    if (toRender.isEmpty()) {
+        return;
+    }
+
+    qDebug() << "ThumbnailManager: Scheduling" << toRender.size()
+             << "high-res thumbnails (priority:"
+             << static_cast<int>(priority) << ")";
+
+    // 创建批任务(传入 this 用于发送信号)
+    auto* task = new ThumbnailBatchTask(
+        m_threadSafeRenderer.get(),
+        m_cache.get(),
+        this,  // 🔥 关键修复: 传入 manager 用于发送信号
+        toRender,
+        priority,
+        false,  // 高清
+        m_lowResWidth,
+        m_highResWidth,
+        m_rotation
+        );
+
+    // 跟踪任务
+    trackTask(task);
+
+    // 提交到线程池
+    m_threadPool->start(task, static_cast<int>(priority));
+}
+
+void ThumbnailManager::renderLowResAsync(const QVector<int>& pageIndices)
+{
+    if (!m_renderer || pageIndices.isEmpty()) {
+        return;
+    }
+
+    // 创建线程安全渲染器(如果还没有)
+    if (!m_threadSafeRenderer) {
+        QString docPath = m_renderer->currentFilePath();
+        if (docPath.isEmpty()) {
+            qWarning() << "ThumbnailManager: No document loaded";
+            return;
+        }
+        m_threadSafeRenderer = std::make_unique<ThreadSafeRenderer>(docPath);
+        if (!m_threadSafeRenderer->isValid()) {
+            qCritical() << "ThumbnailManager: Failed to create thread-safe renderer";
+            m_threadSafeRenderer.reset();
+            return;
+        }
+    }
+
+    // 过滤已缓存的页面
+    QVector<int> toRender;
+    for (int pageIndex : pageIndices) {
+        if (!m_cache->hasLowRes(pageIndex)) {
+            toRender.append(pageIndex);
+        }
+    }
+
+    if (toRender.isEmpty()) {
+        return;
+    }
+
+    qDebug() << "ThumbnailManager: Scheduling" << toRender.size()
+             << "low-res thumbnails (background)";
+
+    // 创建批任务(传入 this 用于发送信号)
+    auto* task = new ThumbnailBatchTask(
+        m_threadSafeRenderer.get(),
+        m_cache.get(),
+        this,  // 🔥 关键修复: 传入 manager 用于发送信号
+        toRender,
+        RenderPriority::LOW,
+        true,  // 低清
+        m_lowResWidth,
+        m_highResWidth,
+        m_rotation
+        );
+
+    // 跟踪任务
+    trackTask(task);
+
+    // 提交到线程池(最低优先级)
+    m_threadPool->start(task, 0);
+}
+
+// ========== 任务控制 ==========
+
+void ThumbnailManager::cancelAllTasks()
+{
+    QMutexLocker locker(&m_taskMutex);
+
+    qDebug() << "ThumbnailManager: Cancelling" << m_activeTasks.size() << "tasks";
+
+    for (ThumbnailBatchTask* task : m_activeTasks) {
+        task->abort();
+    }
+
+    m_activeTasks.clear();
+}
+
+void ThumbnailManager::cancelLowPriorityTasks()
+{
+    QMutexLocker locker(&m_taskMutex);
+
+    // TODO: 需要在任务中记录优先级,才能选择性取消
+    // 目前简单实现:取消所有任务
+    for (ThumbnailBatchTask* task : m_activeTasks) {
+        task->abort();
+    }
+}
+
+void ThumbnailManager::waitForCompletion()
+{
+    m_threadPool->waitForDone();
+}
+
+// ========== 管理 ==========
 
 void ThumbnailManager::clear()
 {
-    QMutexLocker cacheLock(&m_cacheMutex);
-    m_thumbnailCache.clear();
+    cancelAllTasks();
+    m_threadPool->waitForDone();
+    m_cache->clear();
+    m_threadSafeRenderer.reset();  // 重置线程安全渲染器
 
-    QMutexLocker queueLock(&m_queueMutex);
-    m_pendingPages.clear();
-
-    m_loadedCount.storeRelease(0);
-    m_totalPages = 0;
+    qInfo() << "ThumbnailManager: Cache cleared";
 }
 
-bool ThumbnailManager::contains(int pageIndex) const
+QString ThumbnailManager::getStatistics() const
 {
-    QMutexLocker locker(&m_cacheMutex);
-    return m_thumbnailCache.contains(pageIndex);
+    return m_cache->getStatistics();
+}
+
+int ThumbnailManager::cachedCount() const
+{
+    return qMax(m_cache->lowResCount(), m_cache->highResCount());
 }
 
 // ========== 私有方法 ==========
 
-void ThumbnailManager::startAsyncLoading()
+void ThumbnailManager::trackTask(ThumbnailBatchTask* task)
 {
-    QMutexLocker locker(&m_queueMutex);
-
-    if (m_pendingPages.isEmpty()) {
-        return;
-    }
-
-    int maxTasks = maxConcurrency();
-    int currentActive = m_activeTasks.loadAcquire();
-
-    while (!m_pendingPages.isEmpty() && currentActive < maxTasks) {
-        int pageIndex = m_pendingPages.takeFirst();
-        locker.unlock();  // 释放锁以避免死锁
-
-        startTaskForPage(pageIndex);
-
-        currentActive = m_activeTasks.loadAcquire();
-        locker.relock();
-    }
+    QMutexLocker locker(&m_taskMutex);
+    m_activeTasks.append(task);
 }
 
-void ThumbnailManager::startTaskForPage(int pageIndex)
+void ThumbnailManager::untrackTask(ThumbnailBatchTask* task)
 {
-    if (!m_renderer) {
-        return;
-    }
-
-    QString docPath = m_renderer->documentPath();
-    if (docPath.isEmpty()) {
-        return;
-    }
-
-    m_activeTasks.ref();
-
-    auto* task = new ThumbnailTask(
-        this,
-        docPath,
-        pageIndex,
-        m_thumbnailWidth,
-        &m_cancelRequested
-        );
-
-    m_threadPool.start(task);
-}
-
-void ThumbnailManager::handleTaskDone(int pageIndex, const QImage& thumbnail, bool success)
-{
-    // 减少活动任务计数
-    m_activeTasks.deref();
-
-    if (success && !thumbnail.isNull()) {
-        // 存入缓存
-        {
-            QMutexLocker locker(&m_cacheMutex);
-            m_thumbnailCache.insert(pageIndex, thumbnail);
-        }
-
-        // 增加已加载计数
-        int loaded = m_loadedCount.fetchAndAddRelaxed(1) + 1;
-
-        // 发送信号
-        emit thumbnailReady(pageIndex, thumbnail);
-        emit loadProgress(loaded, m_totalPages);
-    } else if (!m_cancelRequested.loadAcquire()) {
-        // 只在非取消状态下报告错误
-        emit loadError(pageIndex, tr("Failed to render thumbnail"));
-    }
-
-    // 检查是否所有任务都完成
-    int remaining = 0;
-    {
-        QMutexLocker locker(&m_queueMutex);
-        remaining = m_pendingPages.size();
-    }
-
-    if (remaining > 0 && !m_cancelRequested.loadAcquire()) {
-        // 继续加载下一批
-        startAsyncLoading();
-    } else if (remaining == 0 && m_activeTasks.loadAcquire() == 0) {
-        // 所有任务完成
-        m_isLoading.storeRelease(0);
-
-        if (m_cancelRequested.loadAcquire()) {
-            qInfo() << "ThumbnailManager: Loading cancelled";
-            emit loadCancelled();
-        } else {
-            qInfo() << "ThumbnailManager: Loading completed -"
-                    << m_loadedCount.loadAcquire() << "/" << m_totalPages;
-            emit loadCompleted();
-        }
-    }
-}
-
-int ThumbnailManager::maxConcurrency() const
-{
-    // 使用 CPU 核心数的一半，最少 2 个，最多 4 个
-    int cores = QThread::idealThreadCount();
-    int concurrency = qMax(2, cores / 2);
-    return qMin(concurrency, 4);
+    QMutexLocker locker(&m_taskMutex);
+    m_activeTasks.removeOne(task);
 }

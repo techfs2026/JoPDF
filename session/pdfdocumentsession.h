@@ -193,19 +193,63 @@ public:
     OutlineEditor* outlineEditor() const;
 
     /**
-     * @brief 开始加载缩略图
+     * @brief 获取缩略图（优先高清，其次低清）
      */
-    void startLoadThumbnails(int thumbnailWidth = 120);
+    QImage getThumbnail(int pageIndex, bool preferHighRes = true) const;
 
     /**
-     * @brief 取消缩略图加载
+     * @brief 检查是否有缩略图
      */
-    void cancelThumbnailLoading();
+    bool hasThumbnail(int pageIndex) const;
 
     /**
-     * @brief 获取缩略图
+     * @brief 设置缩略图尺寸
+     * @param lowResWidth 低清宽度（默认40px）
+     * @param highResWidth 高清宽度（默认120px）
      */
-    QImage getThumbnail(int pageIndex) const;
+    void setThumbnailSize(int lowResWidth = 40, int highResWidth = 120);
+
+    /**
+     * @brief 设置缩略图旋转角度
+     */
+    void setThumbnailRotation(int rotation);
+
+    /**
+     * @brief 立即渲染低清缩略图（同步）
+     * @note 用于首次加载可见区
+     */
+    void renderLowResImmediate(const QVector<int>& pageIndices);
+
+    /**
+     * @brief 异步渲染高清缩略图
+     * @param priority 优先级：3=立即，2=高，1=中，0=低
+     */
+    void renderHighResAsync(const QVector<int>& pageIndices, int priority = 1);
+
+    /**
+     * @brief 异步渲染低清缩略图（后台）
+     */
+    void renderLowResAsync(const QVector<int>& pageIndices);
+
+    /**
+     * @brief 取消所有缩略图渲染任务
+     */
+    void cancelThumbnailTasks();
+
+    /**
+     * @brief 清空缩略图缓存
+     */
+    void clearThumbnails();
+
+    /**
+     * @brief 获取缩略图统计信息
+     */
+    QString getThumbnailStatistics() const;
+
+    /**
+     * @brief 获取已缓存的缩略图数量
+     */
+    int cachedThumbnailCount() const;
 
     // ==================== 便捷方法 - 搜索 ====================
 
@@ -413,25 +457,13 @@ signals:
      */
     void outlineLoaded(bool success, int itemCount);
 
-    /**
-     * @brief 缩略图加载开始
-     */
-    void thumbnailLoadStarted(int totalPages);
 
     /**
      * @brief 缩略图加载进度
      */
     void thumbnailLoadProgress(int loaded, int total);
 
-    /**
-     * @brief 缩略图就绪
-     */
-    void thumbnailReady(int pageIndex, const QImage& thumbnail);
-
-    /**
-     * @brief 缩略图加载完成
-     */
-    void thumbnailLoadCompleted();
+    void thumbnailLoaded(int pageIndex, const QImage& thumbnail, bool isHighRes);
 
     /**
      * @brief 搜索进度更新

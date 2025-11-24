@@ -212,12 +212,6 @@ void PDFDocumentTab::setupConnections()
             this, [this](int pageIndex) {
                 m_session->goToPage(pageIndex);
             });
-
-    // 缩略图加载
-    connect(m_session, &PDFDocumentSession::thumbnailLoadStarted,
-            this, [this](int totalPages) {
-                // 可以显示进度提示
-            });
 }
 
 // ==================== 文档操作 ====================
@@ -454,10 +448,6 @@ void PDFDocumentTab::onDocumentLoaded(const QString& filePath, int pageCount)
 
     if (m_navigationPanel) {
         m_navigationPanel->loadDocument(pageCount);
-
-        if (!m_session->contentHandler()->isThumbnailLoading()) {
-            m_session->startLoadThumbnails(120);
-        }
     }
 
     if (m_session->state()->isTextPDF()) {

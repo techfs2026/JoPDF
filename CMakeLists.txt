@@ -35,6 +35,8 @@ set(HANDLER_SOURCES
 )
 
 set(MANAGER_SOURCES
+    manager/thumbnailbatchtask.cpp
+    manager/thumbnailbatchtask.h
     manager/thumbnailmanager.cpp
     manager/thumbnailmanager.h
     manager/linkmanager.cpp
@@ -55,11 +57,16 @@ set(TOOL_SOURCES
 set(MODEL_SOURCES
     model/outlineitem.cpp
     model/outlineitem.h
+    model/thumbnailcache.cpp
+    model/thumbnailcache.h
 )
 
 set(CORE_SOURCES
     core/mupdfrenderer.cpp
     core/mupdfrenderer.h
+    core/threadsaferenderer.cpp
+    core/threadsaferenderer.h
+    core/mupdfrendererutil.h
 )
 
 set(UI_SOURCES

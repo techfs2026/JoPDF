@@ -103,8 +103,9 @@ void PDFDocumentSession::closeDocument()
         m_textCache->cancelPreload();
     }
 
+    // 取消缩略图任务 (新增)
     if (m_contentHandler) {
-        m_contentHandler->cancelThumbnailLoading();
+        m_contentHandler->cancelThumbnailTasks();
     }
 
     // 清空缓存
@@ -308,23 +309,81 @@ OutlineEditor* PDFDocumentSession::outlineEditor() const
     return m_contentHandler ? m_contentHandler->outlineEditor() : nullptr;
 }
 
-void PDFDocumentSession::startLoadThumbnails(int thumbnailWidth)
+QImage PDFDocumentSession::getThumbnail(int pageIndex, bool preferHighRes) const
+{
+    return m_contentHandler ?
+               m_contentHandler->getThumbnail(pageIndex, preferHighRes) :
+               QImage();
+}
+
+bool PDFDocumentSession::hasThumbnail(int pageIndex) const
+{
+    return m_contentHandler ?
+               m_contentHandler->hasThumbnail(pageIndex) :
+               false;
+}
+
+void PDFDocumentSession::setThumbnailSize(int lowResWidth, int highResWidth)
 {
     if (m_contentHandler) {
-        m_contentHandler->startLoadThumbnails(thumbnailWidth);
+        m_contentHandler->setThumbnailSize(lowResWidth, highResWidth);
     }
 }
 
-void PDFDocumentSession::cancelThumbnailLoading()
+void PDFDocumentSession::setThumbnailRotation(int rotation)
 {
     if (m_contentHandler) {
-        m_contentHandler->cancelThumbnailLoading();
+        m_contentHandler->setThumbnailRotation(rotation);
     }
 }
 
-QImage PDFDocumentSession::getThumbnail(int pageIndex) const
+void PDFDocumentSession::renderLowResImmediate(const QVector<int>& pageIndices)
 {
-    return m_contentHandler ? m_contentHandler->getThumbnail(pageIndex) : QImage();
+    if (m_contentHandler) {
+        m_contentHandler->renderLowResImmediate(pageIndices);
+    }
+}
+
+void PDFDocumentSession::renderHighResAsync(const QVector<int>& pageIndices, int priority)
+{
+    if (m_contentHandler) {
+        m_contentHandler->renderHighResAsync(pageIndices, priority);
+    }
+}
+
+void PDFDocumentSession::renderLowResAsync(const QVector<int>& pageIndices)
+{
+    if (m_contentHandler) {
+        m_contentHandler->renderLowResAsync(pageIndices);
+    }
+}
+
+void PDFDocumentSession::cancelThumbnailTasks()
+{
+    if (m_contentHandler) {
+        m_contentHandler->cancelThumbnailTasks();
+    }
+}
+
+void PDFDocumentSession::clearThumbnails()
+{
+    if (m_contentHandler) {
+        m_contentHandler->clearThumbnails();
+    }
+}
+
+QString PDFDocumentSession::getThumbnailStatistics() const
+{
+    return m_contentHandler ?
+               m_contentHandler->getThumbnailStatistics() :
+               QString();
+}
+
+int PDFDocumentSession::cachedThumbnailCount() const
+{
+    return m_contentHandler ?
+               m_contentHandler->cachedThumbnailCount() :
+               0;
 }
 
 // ==================== 便捷方法 - 搜索 ====================
@@ -614,14 +673,11 @@ void PDFDocumentSession::setupConnections()
         connect(m_contentHandler.get(), &PDFContentHandler::outlineLoaded,
                 this, &PDFDocumentSession::outlineLoaded);
 
-        connect(m_contentHandler.get(), &PDFContentHandler::thumbnailLoadStarted,
-                this, &PDFDocumentSession::thumbnailLoadStarted);
+        connect(m_contentHandler.get(), &PDFContentHandler::thumbnailLoaded,
+                this, &PDFDocumentSession::thumbnailLoaded);
+
         connect(m_contentHandler.get(), &PDFContentHandler::thumbnailLoadProgress,
                 this, &PDFDocumentSession::thumbnailLoadProgress);
-        connect(m_contentHandler.get(), &PDFContentHandler::thumbnailReady,
-                this, &PDFDocumentSession::thumbnailReady);
-        connect(m_contentHandler.get(), &PDFContentHandler::thumbnailLoadCompleted,
-                this, &PDFDocumentSession::thumbnailLoadCompleted);
     }
 
     // ========== InteractionHandler信号连接 ==========

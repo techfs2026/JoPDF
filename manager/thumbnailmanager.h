@@ -1,23 +1,29 @@
-#ifndef THUMBNAILMANAGER_H
-#define THUMBNAILMANAGER_H
+#ifndef THUMBNAILMANAGER_NEW_H
+#define THUMBNAILMANAGER_NEW_H
 
 #include <QObject>
-#include <QImage>
-#include <QMap>
-#include <QVector>
-#include <QAtomicInt>
 #include <QThreadPool>
 #include <QMutex>
+#include <QVector>
+#include <QSet>
+#include <memory>
+
+#include "thumbnailbatchtask.h"
 
 class MuPDFRenderer;
+class ThreadSafeRenderer;
+class ThumbnailCache;
 
 /**
- * @brief 缩略图管理器
+ * @brief 智能缩略图管理器（双分辨率 + 优先级调度）
  *
- * 负责异步加载和缓存 PDF 页面缩略图
- * - 支持多线程并行加载
- * - 支持取消操作
- * - 自动管理缓存
+ * 特点：
+ * 1. 双分辨率缓存（低清 40px + 高清 120px）
+ * 2. 四级优先级队列（IMMEDIATE > HIGH > MEDIUM > LOW）
+ * 3. 任务中断与取消
+ * 4. 线程池管理
+ * 5. 终身缓存（不淘汰）
+ * 6. 线程安全渲染
  */
 class ThumbnailManager : public QObject
 {
@@ -27,136 +33,126 @@ public:
     explicit ThumbnailManager(MuPDFRenderer* renderer, QObject* parent = nullptr);
     ~ThumbnailManager();
 
-    /**
-     * @brief 开始加载缩略图
-     * @param pageCount 总页数
-     * @param thumbnailWidth 缩略图宽度（默认 120）
-     */
-    void startLoading(int pageCount, int thumbnailWidth = 120);
+    // ========== 配置 ==========
 
     /**
-     * @brief 取消当前加载任务
+     * @brief 设置低清宽度（默认 40px）
      */
-    void cancelLoading();
+    void setLowResWidth(int width);
 
     /**
-     * @brief 获取指定页面的缩略图
+     * @brief 设置高清宽度（默认 120px）
+     */
+    void setHighResWidth(int width);
+
+    /**
+     * @brief 设置旋转角度
+     */
+    void setRotation(int rotation);
+
+    // ========== 获取缩略图 ==========
+
+    /**
+     * @brief 获取缩略图（优先返回高清，其次低清）
      * @param pageIndex 页面索引
-     * @return 缩略图图像，如果不存在返回空图像
+     * @param preferHighRes 是否优先高清
+     * @return 如果都不存在返回空图片
      */
-    QImage getThumbnail(int pageIndex) const;
+    QImage getThumbnail(int pageIndex, bool preferHighRes = true);
 
     /**
-     * @brief 检查缩略图是否正在加载
+     * @brief 检查是否有缩略图（低清或高清）
      */
-    bool isLoading() const;
+    bool hasThumbnail(int pageIndex) const;
+
+    // ========== 渲染请求 ==========
 
     /**
-     * @brief 获取已加载的缩略图数量
+     * @brief 立即渲染低清缩略图（同步，阻塞调用者）
+     * @param pageIndices 页面索引列表
+     * @note 用于首次打开文档，快速显示可见区
      */
-    int loadedCount() const;
+    void renderLowResImmediate(const QVector<int>& pageIndices);
 
     /**
-     * @brief 设置缩略图宽度
-     * @param width 缩略图宽度
+     * @brief 异步渲染高清缩略图（高优先级，可见区）
      */
-    void setThumbnailWidth(int width);
+    void renderHighResAsync(const QVector<int>& pageIndices, RenderPriority priority);
 
     /**
-     * @brief 获取缩略图宽度
+     * @brief 异步渲染低清缩略图（低优先级，全文档）
      */
-    int thumbnailWidth() const { return m_thumbnailWidth; }
+    void renderLowResAsync(const QVector<int>& pageIndices);
+
+    // ========== 任务控制 ==========
 
     /**
-     * @brief 清空所有缩略图缓存
+     * @brief 取消所有进行中的任务
+     */
+    void cancelAllTasks();
+
+    /**
+     * @brief 取消低优先级任务
+     */
+    void cancelLowPriorityTasks();
+
+    /**
+     * @brief 等待所有任务完成
+     */
+    void waitForCompletion();
+
+    // ========== 管理 ==========
+
+    /**
+     * @brief 清空缓存
      */
     void clear();
 
     /**
-     * @brief 检查是否包含指定页面的缩略图
+     * @brief 获取统计信息
      */
-    bool contains(int pageIndex) const;
+    QString getStatistics() const;
+
+    /**
+     * @brief 获取已缓存数量
+     */
+    int cachedCount() const;
 
 signals:
     /**
-     * @brief 加载开始
-     * @param totalPages 总页数
-     */
-    void loadStarted(int totalPages);
-
-    /**
-     * @brief 加载进度
-     * @param loadedCount 已加载数量
-     * @param totalCount 总数量
-     */
-    void loadProgress(int loadedCount, int totalCount);
-
-    /**
-     * @brief 单个缩略图加载完成
+     * @brief 缩略图已加载（低清或高清）
      * @param pageIndex 页面索引
      * @param thumbnail 缩略图
+     * @param isHighRes 是否高清
      */
-    void thumbnailReady(int pageIndex, const QImage& thumbnail);
+    void thumbnailLoaded(int pageIndex, const QImage& thumbnail, bool isHighRes);
 
     /**
-     * @brief 所有缩略图加载完成
+     * @brief 批量加载进度
+     * @param loaded 已加载数量
+     * @param total 总数量
      */
-    void loadCompleted();
-
-    /**
-     * @brief 加载取消
-     */
-    void loadCancelled();
-
-    /**
-     * @brief 加载错误
-     * @param pageIndex 页面索引
-     * @param errorMessage 错误信息
-     */
-    void loadError(int pageIndex, const QString& errorMessage);
-
-public slots:
-    /**
-     * @brief 处理任务完成（由工作线程调用）
-     * @param pageIndex 页面索引
-     * @param thumbnail 缩略图
-     * @param success 是否成功
-     */
-    void handleTaskDone(int pageIndex, const QImage& thumbnail, bool success);
+    void loadProgress(int loaded, int total);
 
 private:
-    MuPDFRenderer* m_renderer;
-    QThreadPool m_threadPool;
+    MuPDFRenderer* m_renderer;  // UI 线程使用
+    std::unique_ptr<ThreadSafeRenderer> m_threadSafeRenderer;  // 工作线程使用
+    std::unique_ptr<ThumbnailCache> m_cache;
+    std::unique_ptr<QThreadPool> m_threadPool;
 
-    // 缩略图缓存
-    mutable QMutex m_cacheMutex;
-    QMap<int, QImage> m_thumbnailCache;
+    int m_lowResWidth;
+    int m_highResWidth;
+    int m_rotation;
 
-    // 加载状态
-    QAtomicInt m_isLoading;
-    QAtomicInt m_cancelRequested;
-    QAtomicInt m_loadedCount;
-    QAtomicInt m_activeTasks;
+    // 任务跟踪
+    QMutex m_taskMutex;
+    QVector<ThumbnailBatchTask*> m_activeTasks;
 
-    // 配置
-    int m_thumbnailWidth;
-    int m_totalPages;
+    // 添加任务到跟踪列表
+    void trackTask(ThumbnailBatchTask* task);
 
-    // 待加载队列
-    mutable QMutex m_queueMutex;
-    QVector<int> m_pendingPages;
-
-    // 启动异步加载任务
-    void startAsyncLoading();
-
-    // 为指定页面启动加载任务
-    void startTaskForPage(int pageIndex);
-
-    // 默认缩略图宽度
-    static constexpr int DEFAULT_THUMBNAIL_WIDTH = 120;
-
-    // 最大并发任务数（使用 CPU 核心数的一半）
-    int maxConcurrency() const;
+    // 移除任务（任务完成时自动调用）
+    void untrackTask(ThumbnailBatchTask* task);
 };
 
-#endif // THUMBNAILMANAGER_H
+#endif // THUMBNAILMANAGER_NEW_H

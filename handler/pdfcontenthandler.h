@@ -81,46 +81,67 @@ public:
      */
     void clearOutline();
 
-    // ========== 缩略图管理 ==========
+    // ========== 缩略图管理 (新版智能管理器) ==========
 
     /**
-     * @brief 开始加载缩略图
-     * @param thumbnailWidth 缩略图宽度
+     * @brief 获取缩略图管理器
      */
-    void startLoadThumbnails(int thumbnailWidth = 120);
+    ThumbnailManager* thumbnailManager() const { return m_thumbnailManager.get(); }
 
     /**
-     * @brief 取消缩略图加载
+     * @brief 获取缩略图（优先高清，其次低清）
      */
-    void cancelThumbnailLoading();
+    QImage getThumbnail(int pageIndex, bool preferHighRes = true) const;
 
     /**
-     * @brief 获取指定页面的缩略图
-     * @param pageIndex 页面索引
-     * @return 缩略图图像，如果不存在返回空图像
+     * @brief 检查是否有缩略图
      */
-    QImage getThumbnail(int pageIndex) const;
+    bool hasThumbnail(int pageIndex) const;
 
     /**
-     * @brief 检查缩略图是否正在加载
+     * @brief 设置缩略图尺寸
      */
-    bool isThumbnailLoading() const;
+    void setThumbnailSize(int lowResWidth, int highResWidth);
 
     /**
-     * @brief 获取已加载的缩略图数量
+     * @brief 设置缩略图旋转角度
      */
-    int loadedThumbnailCount() const;
+    void setThumbnailRotation(int rotation);
 
     /**
-     * @brief 设置缩略图大小
-     * @param width 缩略图宽度
+     * @brief 立即渲染低清缩略图（同步）
      */
-    void setThumbnailSize(int width);
+    void renderLowResImmediate(const QVector<int>& pageIndices);
+
+    /**
+     * @brief 异步渲染高清缩略图
+     */
+    void renderHighResAsync(const QVector<int>& pageIndices, int priority = 1);
+
+    /**
+     * @brief 异步渲染低清缩略图
+     */
+    void renderLowResAsync(const QVector<int>& pageIndices);
+
+    /**
+     * @brief 取消所有缩略图渲染任务
+     */
+    void cancelThumbnailTasks();
 
     /**
      * @brief 清空缩略图缓存
      */
     void clearThumbnails();
+
+    /**
+     * @brief 获取缩略图统计信息
+     */
+    QString getThumbnailStatistics() const;
+
+    /**
+     * @brief 获取已缓存的缩略图数量
+     */
+    int cachedThumbnailCount() const;
 
     // ========== 工具方法 ==========
 
@@ -200,37 +221,19 @@ signals:
      */
     void outlineLoaded(bool success, int itemCount);
 
-    // ========== 缩略图信号 ==========
+    // ========== 缩略图信号 (新版) ==========
 
     /**
-     * @brief 缩略图加载开始
-     * @param totalPages 总页数
+     * @brief 缩略图已加载（低清或高清）
      */
-    void thumbnailLoadStarted(int totalPages);
+    void thumbnailLoaded(int pageIndex, const QImage& thumbnail, bool isHighRes);
 
     /**
      * @brief 缩略图加载进度
-     * @param loadedCount 已加载数量
-     * @param totalCount 总数量
      */
-    void thumbnailLoadProgress(int loadedCount, int totalCount);
+    void thumbnailLoadProgress(int loaded, int total);
 
-    /**
-     * @brief 单个缩略图加载完成
-     * @param pageIndex 页面索引
-     * @param thumbnail 缩略图
-     */
-    void thumbnailReady(int pageIndex, const QImage& thumbnail);
-
-    /**
-     * @brief 所有缩略图加载完成
-     */
-    void thumbnailLoadCompleted();
-
-    /**
-     * @brief 缩略图加载取消
-     */
-    void thumbnailLoadCancelled();
+    // ========== 大纲编辑信号 ==========
 
     void outlineModified();
     void outlineSaveCompleted(bool success, const QString& errorMsg);
