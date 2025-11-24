@@ -46,6 +46,7 @@ PDFDocumentSession::PDFDocumentSession(QObject* parent)
 
 PDFDocumentSession::~PDFDocumentSession()
 {
+    closeDocument();
     qInfo() << "PDFDocumentSession: Destroyed";
 }
 
@@ -69,8 +70,6 @@ bool PDFDocumentSession::loadDocument(const QString& filePath, QString* errorMes
         if (errorMessage) *errorMessage = error;
         return false;
     }
-
-    m_currentFilePath = filePath;
 
     // 更新State
     int pageCount = m_contentHandler->pageCount();
@@ -121,8 +120,6 @@ void PDFDocumentSession::closeDocument()
     if (m_contentHandler) {
         m_contentHandler->closeDocument();
     }
-
-    m_currentFilePath.clear();
 
     // 重置State
     m_state->reset();
@@ -587,6 +584,7 @@ void PDFDocumentSession::setupConnections()
                             newPageIndex, AppConfig::PAGE_MARGIN, m_state->pageYPositions());
                         emit scrollToPositionRequested(targetY);
                     }
+                    emit currentPageChanged(newPageIndex);
                 });
 
         // 缩放设置完成 -> 更新State
@@ -608,6 +606,8 @@ void PDFDocumentSession::setupConnections()
                     }
 
                     updateCacheAfterStateChange();
+
+                    emit zoomSettingCompleted(newZoom, newMode);
                 });
 
         // 显示模式设置完成 -> 更新State
@@ -616,6 +616,7 @@ void PDFDocumentSession::setupConnections()
                     // 双页模式自动关闭连续滚动
                     if (newMode == PageDisplayMode::DoublePage && m_state->isContinuousScroll()) {
                         m_state->setContinuousScroll(false);
+                        emit continuousScrollChanged(false);
                     }
 
                     m_state->setCurrentDisplayMode(newMode);
@@ -625,7 +626,7 @@ void PDFDocumentSession::setupConnections()
                         m_state->setCurrentPage(adjustedPage);
                     }
 
-
+                    emit currentDisplayModeChanged(newMode);
                 });
 
         // 连续滚动设置完成 -> 更新State
@@ -633,12 +634,14 @@ void PDFDocumentSession::setupConnections()
                 this, [this](bool continuous) {
                     qDebug() << "m_state->setContinuousScroll(continuous);";
                     m_state->setContinuousScroll(continuous);
+                    emit continuousScrollChanged(continuous);
                 });
 
         connect(m_viewHandler.get(), &PDFViewHandler::pagePositionsCalculated,
                 this, [this](const QVector<int>& positions,const QVector<int>& heights) {
                     qDebug() << "m_state->setPagePositions(positions, heights);";
                     m_state->setPagePositions(positions, heights);
+                    emit pagePositionsChanged(positions, heights);
                 });
 
 
@@ -654,6 +657,8 @@ void PDFDocumentSession::setupConnections()
                     }
 
                     updateCacheAfterStateChange();
+
+                    emit currentRotationChanged(newRotation);
                 });
 
         // 页面位置计算完成 -> 更新State（已在calculatePagePositions中处理）
@@ -667,6 +672,8 @@ void PDFDocumentSession::setupConnections()
 
     if (m_contentHandler) {
         // 文档事件直接转发（非状态变化）
+        connect(m_contentHandler.get(), &PDFContentHandler::documentLoaded,
+                this, &PDFDocumentSession::documentLoaded);
         connect(m_contentHandler.get(), &PDFContentHandler::documentError,
                 this, &PDFDocumentSession::documentError);
 
@@ -729,44 +736,6 @@ void PDFDocumentSession::setupConnections()
 
         connect(m_interactionHandler.get(), &PDFInteractionHandler::textCopied,
                 this, &PDFDocumentSession::textCopied);
-    }
-
-    // ========== State信号转发（State -> Session -> UI）==========
-
-    if (m_state) {
-        // 文档状态
-        connect(m_state.get(), &PDFDocumentState::documentLoadedChanged,
-                this, &PDFDocumentSession::documentLoadedChanged);
-        connect(m_state.get(), &PDFDocumentState::documentTypeChanged,
-                this, &PDFDocumentSession::documentTypeChanged);
-
-        // 导航状态
-        connect(m_state.get(), &PDFDocumentState::currentPageChanged,
-                this, &PDFDocumentSession::currentPageChanged);
-
-        // 缩放状态
-        connect(m_state.get(), &PDFDocumentState::currentZoomChanged,
-                this, &PDFDocumentSession::currentZoomChanged);
-        connect(m_state.get(), &PDFDocumentState::currentZoomModeChanged,
-                this, &PDFDocumentSession::currentZoomModeChanged);
-
-        // 显示模式状态
-        connect(m_state.get(), &PDFDocumentState::currentDisplayModeChanged,
-                this, &PDFDocumentSession::currentDisplayModeChanged);
-        connect(m_state.get(), &PDFDocumentState::continuousScrollChanged,
-                this, &PDFDocumentSession::continuousScrollChanged);
-        connect(m_state.get(), &PDFDocumentState::currentRotationChanged,
-                this, &PDFDocumentSession::currentRotationChanged);
-
-        // 连续滚动状态
-        connect(m_state.get(), &PDFDocumentState::pagePositionsChanged,
-                this, &PDFDocumentSession::pagePositionsChanged);
-
-        // 交互状态
-        connect(m_state.get(), &PDFDocumentState::linksVisibleChanged,
-                this, &PDFDocumentSession::linksVisibleChanged);
-        connect(m_state.get(), &PDFDocumentState::searchStateChanged,
-                this, &PDFDocumentSession::searchStateChanged);
     }
 
     // ========== TextCacheManager信号连接 ==========

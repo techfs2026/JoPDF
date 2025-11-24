@@ -85,12 +85,6 @@ void NavigationPanel::updateCurrentPage(int pageIndex)
     }
 }
 
-void NavigationPanel::setThumbnail(int pageIndex, const QImage& thumbnail)
-{
-    // 新版不需要手动设置，ThumbnailWidget 会通过信号自动更新
-    Q_UNUSED(pageIndex);
-    Q_UNUSED(thumbnail);
-}
 
 void NavigationPanel::setupUI()
 {
@@ -165,8 +159,7 @@ void NavigationPanel::setupUI()
     }
 
     m_thumbnailWidget = new ThumbnailWidget(
-        m_session->renderer(),
-        thumbnailManager,
+        m_session,
         this
         );
     m_thumbnailWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -291,14 +284,6 @@ void NavigationPanel::setupConnections()
     // 缩略图跳转信号
     connect(m_thumbnailWidget, &ThumbnailWidget::pageJumpRequested,
             this, &NavigationPanel::pageJumpRequested);
-
-    // 缩略图加载进度(可选显示)
-    connect(m_thumbnailWidget, &ThumbnailWidget::loadProgress,
-            this, [](int current, int total) {
-                if(current == total) {
-                    qDebug() << "Thumbnail loading progress done:" << current << "/" << total;
-                }
-            });
 
     // ========== Session信号连接 ==========
 

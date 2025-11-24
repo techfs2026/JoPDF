@@ -25,8 +25,8 @@ ThumbnailManager::ThumbnailManager(MuPDFRenderer* renderer, QObject* parent)
 
 ThumbnailManager::~ThumbnailManager()
 {
-    cancelAllTasks();
-    m_threadPool->waitForDone();
+    clear();
+    qInfo() << "ThumbnailManager: Destroyed";
 }
 
 // ========== 配置 ==========

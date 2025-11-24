@@ -29,27 +29,16 @@ PDFDocumentState::~PDFDocumentState()
 void PDFDocumentState::setDocumentLoaded(bool loaded, const QString& path,
                                          int pageCount, bool isTextPDF)
 {
-    bool changed = (m_isDocumentLoaded != loaded);
-
     m_isDocumentLoaded = loaded;
     m_documentPath = path;
     m_pageCount = pageCount;
     m_isTextPDF = isTextPDF;
-
-    if (changed) {
-        emit documentLoadedChanged(loaded, path, pageCount);
-
-        if (loaded) {
-            emit documentTypeChanged(isTextPDF);
-        }
-    }
 }
 
 void PDFDocumentState::setCurrentPage(int pageIndex)
 {
     if (m_currentPage != pageIndex) {
         m_currentPage = pageIndex;
-        emit currentPageChanged(pageIndex);
     }
 }
 
@@ -57,7 +46,6 @@ void PDFDocumentState::setCurrentZoom(double zoom)
 {
     if (qAbs(m_currentZoom - zoom) > 0.001) {
         m_currentZoom = zoom;
-        emit currentZoomChanged(zoom);
     }
 }
 
@@ -65,7 +53,6 @@ void PDFDocumentState::setCurrentZoomMode(ZoomMode mode)
 {
     if (m_currentZoomMode != mode) {
         m_currentZoomMode = mode;
-        emit currentZoomModeChanged(mode);
     }
 }
 
@@ -73,7 +60,6 @@ void PDFDocumentState::setCurrentDisplayMode(PageDisplayMode mode)
 {
     if (m_currentDisplayMode != mode) {
         m_currentDisplayMode = mode;
-        emit currentDisplayModeChanged(mode);
     }
 }
 
@@ -89,7 +75,6 @@ void PDFDocumentState::setCurrentRotation(int rotation)
 {
     if (m_currentRotation != rotation) {
         m_currentRotation = rotation;
-        emit currentRotationChanged(rotation);
     }
 }
 
@@ -126,7 +111,6 @@ void PDFDocumentState::setSearchState(bool searching, int totalMatches, int curr
         m_isSearching = searching;
         m_searchTotalMatches = totalMatches;
         m_searchCurrentMatchIndex = currentIndex;
-        emit searchStateChanged(searching, totalMatches, currentIndex);
     }
 }
 

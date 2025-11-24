@@ -373,7 +373,7 @@ signals:
     /**
      * @brief 文档加载状态变化
      */
-    void documentLoadedChanged(bool loaded, const QString& path, int pageCount);
+    void documentLoaded(const QString& path, int pageCount);
 
     /**
      * @brief 文档类型检测完成
@@ -393,7 +393,7 @@ signals:
     void currentPageChanged(int pageIndex);
 
     // ==================== 缩放状态变化信号 ====================
-
+    void zoomSettingCompleted(double zoom, ZoomMode mode);
     /**
      * @brief 当前缩放比例变化
      */
@@ -534,9 +534,6 @@ private:
 
     // State（集中管理状态）
     std::unique_ptr<PDFDocumentState> m_state;
-
-    // 临时数据
-    QString m_currentFilePath;
 };
 
 #endif // PDFDOCUMENTSESSION_H

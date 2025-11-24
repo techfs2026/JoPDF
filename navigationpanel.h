@@ -22,7 +22,6 @@ public:
     void loadDocument(int pageCount);
     void clear();
     void updateCurrentPage(int pageIndex);
-    void setThumbnail(int pageIndex, const QImage& thumbnail);
 
 signals:
     void pageJumpRequested(int pageIndex);

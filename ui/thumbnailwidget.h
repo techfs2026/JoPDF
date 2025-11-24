@@ -11,6 +11,8 @@
 #include <QQueue>
 #include <QPair>
 
+#include "pdfdocumentsession.h"
+
 class MuPDFRenderer;
 class ThumbnailManager;
 class ThumbnailItem;
@@ -39,8 +41,7 @@ class ThumbnailWidget : public QScrollArea
     Q_OBJECT
 
 public:
-    explicit ThumbnailWidget(MuPDFRenderer* renderer,
-                             ThumbnailManager* thumbnailManager,
+    explicit ThumbnailWidget(PDFDocumentSession* session,
                              QWidget* parent = nullptr);
     ~ThumbnailWidget();
 
@@ -75,10 +76,7 @@ signals:
      */
     void pageJumpRequested(int pageIndex);
 
-    /**
-     * @brief 加载进度
-     */
-    void loadProgress(int loaded, int total);
+
 
 protected:
     void scrollContentsBy(int dx, int dy) override;

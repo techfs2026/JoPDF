@@ -12,12 +12,10 @@
  * 职责：
  * 1. 存储文档的所有最终状态（不含中间状态）
  * 2. 提供状态查询接口
- * 3. 状态变更时发出信号
  *
  * 设计原则：
  * - 只存最终状态，不存计算中间值
  * - 状态变更由Session统一管理
- * - 发出的信号命名为 xxxChanged
  */
 class PDFDocumentState : public QObject
 {
@@ -144,73 +142,6 @@ public:
      */
     void reset();
 
-signals:
-    // ==================== 文档状态变化信号 ====================
-
-    /**
-     * @brief 文档加载状态变化
-     */
-    void documentLoadedChanged(bool loaded, const QString& path, int pageCount);
-
-    /**
-     * @brief 文档类型检测完成
-     */
-    void documentTypeChanged(bool isTextPDF);
-
-    // ==================== 导航状态变化信号 ====================
-
-    /**
-     * @brief 当前页码变化
-     */
-    void currentPageChanged(int pageIndex);
-
-    // ==================== 缩放状态变化信号 ====================
-
-    /**
-     * @brief 当前缩放比例变化
-     */
-    void currentZoomChanged(double zoom);
-
-    /**
-     * @brief 缩放模式变化
-     */
-    void currentZoomModeChanged(ZoomMode mode);
-
-    // ==================== 显示模式状态变化信号 ====================
-
-    /**
-     * @brief 显示模式变化
-     */
-    void currentDisplayModeChanged(PageDisplayMode mode);
-
-    /**
-     * @brief 连续滚动模式变化
-     */
-    void continuousScrollChanged(bool continuous);
-
-    /**
-     * @brief 旋转角度变化
-     */
-    void currentRotationChanged(int rotation);
-
-    // ==================== 连续滚动状态变化信号 ====================
-
-    /**
-     * @brief 页面位置计算完成
-     */
-    void pagePositionsChanged(const QVector<int>& positions, const QVector<int>& heights);
-
-    // ==================== 交互状态变化信号 ====================
-
-    /**
-     * @brief 链接可见性变化
-     */
-    void linksVisibleChanged(bool visible);
-
-    /**
-     * @brief 搜索状态变化
-     */
-    void searchStateChanged(bool searching, int totalMatches, int currentIndex);
 
 private:
     // 文档基本信息

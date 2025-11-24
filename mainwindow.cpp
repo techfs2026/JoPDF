@@ -158,7 +158,6 @@ void MainWindow::closeTab(int index)
         return;
     }
 
-    // ✅ 直接关闭最后一个标签页
     disconnectTabSignals(tab);
     m_tabWidget->removeTab(index);
     tab->deleteLater();

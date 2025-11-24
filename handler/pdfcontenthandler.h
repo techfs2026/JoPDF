@@ -240,9 +240,11 @@ signals:
 
 private:
     MuPDFRenderer* m_renderer;
+
     std::unique_ptr<OutlineManager> m_outlineManager;
-    std::unique_ptr<ThumbnailManager> m_thumbnailManager;
     std::unique_ptr<OutlineEditor> m_outlineEditor;
+
+    std::unique_ptr<ThumbnailManager> m_thumbnailManager;
 
     // 连接子管理器的信号
     void setupConnections();

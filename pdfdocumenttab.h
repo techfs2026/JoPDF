@@ -128,9 +128,6 @@ private:
     QSplitter* m_splitter;
     QScrollArea* m_scrollArea;
     QProgressBar* m_textPreloadProgress;
-
-    // 状态
-    QString m_filePath;
 };
 
 #endif // PDFDOCUMENTTAB_H

@@ -17,12 +17,11 @@
 //                       ThumbnailWidget
 // ================================================================
 
-ThumbnailWidget::ThumbnailWidget(MuPDFRenderer* renderer,
-                                 ThumbnailManager* thumbnailManager,
+ThumbnailWidget::ThumbnailWidget(PDFDocumentSession* session,
                                  QWidget* parent)
     : QScrollArea(parent)
-    , m_renderer(renderer)
-    , m_thumbnailManager(thumbnailManager)
+    , m_renderer(session->renderer())
+    , m_thumbnailManager(session->contentHandler()->thumbnailManager())
     , m_container(nullptr)
     , m_layout(nullptr)
     , m_thumbnailWidth(DEFAULT_THUMBNAIL_WIDTH)
@@ -66,16 +65,36 @@ ThumbnailWidget::ThumbnailWidget(MuPDFRenderer* renderer,
 ThumbnailWidget::~ThumbnailWidget()
 {
     clear();
+    m_throttleTimer->stop();
+    m_debounceTimer->stop();
 }
 
 void ThumbnailWidget::clear()
 {
-    qDeleteAll(m_thumbnailItems);
+    if (!m_layout)
+        return;
+
+    // 1. 从布局中安全移除所有 widget
+    while (QLayoutItem* item = m_layout->takeAt(0)) {
+
+        if (QWidget* w = item->widget()) {
+            // 标记为稍后删除（不会立刻 delete，避免复杂递归触发）
+            w->deleteLater();
+        }
+
+        delete item; // 删除布局项（不会删除 widget）
+    }
+
+    // 2. 清空所有存储的指针（避免悬空指针）
     m_thumbnailItems.clear();
     m_itemRects.clear();
-    m_currentPage = -1;
     m_scrollHistory.clear();
+    m_currentPage = -1;
+
+    // 3. 强制刷新布局，防止“空布局尺寸残留”
+    m_layout->invalidate();
 }
+
 
 void ThumbnailWidget::loadThumbnails(int pageCount)
 {

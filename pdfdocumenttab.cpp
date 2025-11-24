@@ -29,9 +29,6 @@ PDFDocumentTab::PDFDocumentTab(QWidget* parent)
 
 PDFDocumentTab::~PDFDocumentTab()
 {
-    if (m_session) {
-        m_session->closeDocument();
-    }
 }
 
 // ==================== UI设置 ====================
@@ -99,16 +96,10 @@ void PDFDocumentTab::setupConnections()
     // ========== Session状态变化信号 ==========
 
     // 文档加载状态变化
-    connect(m_session, &PDFDocumentSession::documentLoadedChanged,
-            this, [this](bool loaded, const QString& path, int pageCount) {
-                if (loaded) {
-                    onDocumentLoaded(path, pageCount);
-                } else {
-                    m_filePath.clear();
-                    m_navigationPanel->clear();
-                    m_pageWidget->refresh();
-                    emit documentClosed();
-                }
+    connect(m_session, &PDFDocumentSession::documentLoaded,
+            this, [this](const QString& path, int pageCount) {
+                onDocumentLoaded(path, pageCount);
+                onPageChanged(0);
             });
 
     connect(m_session, &PDFDocumentSession::documentError,
@@ -125,9 +116,11 @@ void PDFDocumentTab::setupConnections()
                 emit zoomChanged(zoom);
             });
 
-    connect(m_session, &PDFDocumentSession::currentZoomModeChanged,
-            this, [this](ZoomMode mode) {
+    connect(m_session, &PDFDocumentSession::zoomSettingCompleted,
+            this, [this](double zoom, ZoomMode mode) {
+                m_pageWidget->onZoomChanged(zoom);
                 m_pageWidget->setZoomMode(mode);
+                emit zoomChanged(zoom);
             });
 
     // 显示模式变化
@@ -164,7 +157,6 @@ void PDFDocumentTab::setupConnections()
             this, [this](int value) {
                 const PDFDocumentState* state = m_session->state();
                 if (state->isContinuousScroll()) {
-                    m_session->updateCurrentPageFromScroll(value);
                     m_pageWidget->updateCurrentPageFromScroll(value);
                 }
             });
@@ -221,8 +213,6 @@ bool PDFDocumentTab::loadDocument(const QString& filePath, QString* errorMessage
     if (!m_session->loadDocument(filePath, errorMessage)) {
         return false;
     }
-
-    m_filePath = filePath;
     return true;
 }
 
@@ -238,15 +228,15 @@ bool PDFDocumentTab::isDocumentLoaded() const
 
 QString PDFDocumentTab::documentPath() const
 {
-    return m_filePath;
+    return m_session->documentPath();
 }
 
 QString PDFDocumentTab::documentTitle() const
 {
-    if (m_filePath.isEmpty()) {
+    if (documentPath().isEmpty()) {
         return tr("New Tab");
     }
-    return QFileInfo(m_filePath).fileName();
+    return QFileInfo(documentPath()).fileName();
 }
 
 // ==================== 导航操作 ====================
@@ -444,8 +434,6 @@ bool PDFDocumentTab::isTextPDF() const
 
 void PDFDocumentTab::onDocumentLoaded(const QString& filePath, int pageCount)
 {
-    m_filePath = filePath;
-
     if (m_navigationPanel) {
         m_navigationPanel->loadDocument(pageCount);
     }

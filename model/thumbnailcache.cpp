@@ -8,7 +8,6 @@ ThumbnailCache::ThumbnailCache()
 
 ThumbnailCache::~ThumbnailCache()
 {
-    clear();
 }
 
 // ========== 低清缓存 ==========
