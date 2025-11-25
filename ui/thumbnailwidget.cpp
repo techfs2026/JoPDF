@@ -53,13 +53,6 @@ ThumbnailWidget::~ThumbnailWidget()
 {
     qDebug() << "ThumbnailWidget: Destructor called";
 
-    if (m_throttleTimer) {
-        m_throttleTimer->stop();
-    }
-    if (m_debounceTimer) {
-        m_debounceTimer->stop();
-    }
-
     clear();
 
     qDebug() << "ThumbnailWidget: Destructor finished";
@@ -117,13 +110,6 @@ void ThumbnailWidget::clear()
     }
     if (m_debounceTimer && m_debounceTimer->isActive()) {
         m_debounceTimer->stop();
-    }
-
-    for (auto it = m_thumbnailItems.begin(); it != m_thumbnailItems.end(); ++it) {
-        if (it.value()) {
-            disconnect(it.value(), nullptr, this, nullptr);
-            it.value()->disconnect();
-        }
     }
 
     while (QLayoutItem* item = m_layout->takeAt(0)) {

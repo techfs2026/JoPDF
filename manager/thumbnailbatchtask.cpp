@@ -5,7 +5,7 @@
 #include <QElapsedTimer>
 #include <QDebug>
 
-ThumbnailBatchTask::ThumbnailBatchTask(ThreadSafeRenderer* renderer,
+ThumbnailBatchTask::ThumbnailBatchTask(const QString& docPath,
                                        ThumbnailCache* cache,
                                        ThumbnailManager* manager,
                                        const QVector<int>& pageIndices,
@@ -14,7 +14,7 @@ ThumbnailBatchTask::ThumbnailBatchTask(ThreadSafeRenderer* renderer,
                                        int lowResWidth,
                                        int highResWidth,
                                        int rotation)
-    : m_renderer(renderer)
+    : m_renderer(std::make_unique<ThreadSafeRenderer>(docPath))
     , m_cache(cache)
     , m_manager(manager)
     , m_pageIndices(pageIndices)

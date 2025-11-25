@@ -5,78 +5,96 @@
 #include <QImage>
 #include <QSizeF>
 #include <QMutex>
-#include <QThreadStorage>
-#include <QThread>
 
 extern "C" {
 #include <mupdf/fitz.h>
 }
 
 /**
- * @brief 线程安全的 MuPDF 渲染器 (修复版)
+ * @brief 线程安全的 PDF 渲染器
  *
- * 核心设计变更：
- * - 每个线程维护自己的 fz_context
- * - 每个线程维护自己的 fz_document（独立打开）
- * - 使用 QThreadStorage 实现 TLS
- *
- * 为什么不共享 document？
- * - MuPDF 的 fz_document 内部有状态（缓存、页面树等）
- * - 多线程访问即使只读也可能导致数据竞争
- * - 每个线程独立打开文档是最安全的方案
+ * 每个实例拥有独立的 fz_context 和 fz_document
+ * 适用于多线程环境，每个线程/任务创建自己的实例
  */
 class ThreadSafeRenderer
 {
 public:
     /**
-     * @brief 构造函数
+     * @brief 构造函数 - 创建渲染器并加载文档
      * @param documentPath PDF 文档路径
      */
     explicit ThreadSafeRenderer(const QString& documentPath);
 
+    /**
+     * @brief 析构函数 - 自动清理资源
+     */
     ~ThreadSafeRenderer();
 
-    /**
-     * @brief 渲染页面（线程安全）
-     * @param pageIndex 页面索引
-     * @param zoom 缩放比例
-     * @param rotation 旋转角度
-     * @return 渲染的图片，失败返回空图片
-     */
-    QImage renderPage(int pageIndex, double zoom, int rotation = 0);
+    // 禁止拷贝
+    ThreadSafeRenderer(const ThreadSafeRenderer&) = delete;
+    ThreadSafeRenderer& operator=(const ThreadSafeRenderer&) = delete;
 
     /**
-     * @brief 获取页面尺寸（线程安全）
+     * @brief 检查文档是否成功加载
+     */
+    bool isDocumentLoaded() const;
+
+    /**
+     * @brief 获取文档总页数
+     */
+    int pageCount() const;
+
+    /**
+     * @brief 渲染指定页面
+     * @param pageIndex 页面索引 (0-based)
+     * @param zoom 缩放比例
+     * @param rotation 旋转角度 (0, 90, 180, 270)
+     * @return 渲染后的图像，失败返回空图像
+     */
+    QImage renderPage(int pageIndex, double zoom, int rotation);
+
+    /**
+     * @brief 获取页面尺寸
+     * @param pageIndex 页面索引 (0-based)
+     * @return 页面尺寸 (points)，失败返回空尺寸
      */
     QSizeF getPageSize(int pageIndex);
 
     /**
-     * @brief 获取页数
+     * @brief 获取最后的错误信息
      */
-    int pageCount() const { return m_pageCount; }
-
-    /**
-     * @brief 是否初始化成功
-     */
-    bool isValid() const { return !m_documentPath.isEmpty(); }
+    QString getLastError() const;
 
 private:
-    // 文档路径（所有线程共享）
-    QString m_documentPath;
-    int m_pageCount;  // 页数（只初始化一次）
+    /**
+     * @brief 初始化 MuPDF context
+     * @return 成功返回 true
+     */
+    bool initializeContext();
 
-    // 线程局部数据
-    QThreadStorage<fz_context*> m_threadContexts;
-    QThreadStorage<fz_document*> m_threadDocuments;
+    /**
+     * @brief 加载 PDF 文档
+     * @return 成功返回 true
+     */
+    bool loadDocument();
 
-    // 保护共享状态
-    mutable QMutex m_cleanupMutex;
+    /**
+     * @brief 关闭文档
+     */
+    void closeDocument();
 
-    // 获取当前线程的 context
-    fz_context* getThreadContext();
+    /**
+     * @brief 设置错误信息
+     */
+    void setLastError(const QString& error);
 
-    // 获取当前线程的 document（每个线程独立打开）
-    fz_document* getThreadDocument(fz_context* ctx);
+private:
+    QString m_documentPath;        // 文档路径
+    fz_context* m_context;         // MuPDF context (独立实例)
+    fz_document* m_document;       // MuPDF document
+    int m_pageCount;               // 文档页数
+    mutable QString m_lastError;   // 最后的错误信息
+    QMutex m_mutex;                // 保护并发访问
 };
 
 #endif // THREADSAFERENDERER_H

@@ -135,21 +135,6 @@ void ThumbnailManager::renderHighResAsync(const QVector<int>& pageIndices,
         return;
     }
 
-    // 创建线程安全渲染器(如果还没有)
-    if (!m_threadSafeRenderer) {
-        QString docPath = m_renderer->currentFilePath();
-        if (docPath.isEmpty()) {
-            qWarning() << "ThumbnailManager: No document loaded";
-            return;
-        }
-        m_threadSafeRenderer = std::make_unique<ThreadSafeRenderer>(docPath);
-        if (!m_threadSafeRenderer->isValid()) {
-            qCritical() << "ThumbnailManager: Failed to create thread-safe renderer";
-            m_threadSafeRenderer.reset();
-            return;
-        }
-    }
-
     // 过滤已缓存的页面
     QVector<int> toRender;
     for (int pageIndex : pageIndices) {
@@ -168,7 +153,7 @@ void ThumbnailManager::renderHighResAsync(const QVector<int>& pageIndices,
 
     // 创建批任务(传入 this 用于发送信号)
     auto* task = new ThumbnailBatchTask(
-        m_threadSafeRenderer.get(),
+        m_renderer->documentPath(),
         m_cache.get(),
         this,  // 🔥 关键修复: 传入 manager 用于发送信号
         toRender,
@@ -192,21 +177,6 @@ void ThumbnailManager::renderLowResAsync(const QVector<int>& pageIndices)
         return;
     }
 
-    // 创建线程安全渲染器(如果还没有)
-    if (!m_threadSafeRenderer) {
-        QString docPath = m_renderer->currentFilePath();
-        if (docPath.isEmpty()) {
-            qWarning() << "ThumbnailManager: No document loaded";
-            return;
-        }
-        m_threadSafeRenderer = std::make_unique<ThreadSafeRenderer>(docPath);
-        if (!m_threadSafeRenderer->isValid()) {
-            qCritical() << "ThumbnailManager: Failed to create thread-safe renderer";
-            m_threadSafeRenderer.reset();
-            return;
-        }
-    }
-
     // 过滤已缓存的页面
     QVector<int> toRender;
     for (int pageIndex : pageIndices) {
@@ -224,7 +194,7 @@ void ThumbnailManager::renderLowResAsync(const QVector<int>& pageIndices)
 
     // 创建批任务(传入 this 用于发送信号)
     auto* task = new ThumbnailBatchTask(
-        m_threadSafeRenderer.get(),
+        m_renderer->currentFilePath(),
         m_cache.get(),
         this,  // 🔥 关键修复: 传入 manager 用于发送信号
         toRender,

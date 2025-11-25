@@ -1,136 +1,155 @@
 #include "threadsaferenderer.h"
 #include <QDebug>
 #include <cstring>
+#include <QThread>
 #include "mupdfrendererutil.h"
+
+// ========================================
+// ThreadSafeRenderer 实现
+// 每个实例拥有独立的 context 和 document
+// ========================================
 
 ThreadSafeRenderer::ThreadSafeRenderer(const QString& documentPath)
     : m_documentPath(documentPath)
+    , m_context(nullptr)
+    , m_document(nullptr)
     , m_pageCount(0)
 {
-    qInfo() << "ThreadSafeRenderer: Initialized for" << documentPath;
+    qDebug() << "ThreadSafeRenderer: Creating for" << documentPath
+             << "Thread:" << QThread::currentThreadId();
+
+    // 初始化 context
+    if (!initializeContext()) {
+        qCritical() << "ThreadSafeRenderer: Failed to initialize context";
+        return;
+    }
+
+    // 加载文档
+    if (!loadDocument()) {
+        qCritical() << "ThreadSafeRenderer: Failed to load document";
+        return;
+    }
+
+    qInfo() << "ThreadSafeRenderer: Successfully initialized with"
+            << m_pageCount << "pages"
+            << "Thread:" << QThread::currentThreadId();
 }
 
 ThreadSafeRenderer::~ThreadSafeRenderer()
 {
-    QMutexLocker locker(&m_cleanupMutex);
+    QMutexLocker locker(&m_mutex);
 
-    // QThreadStorage 会在线程结束时自动清理 context 和 document
-    // 我们需要手动清理当前线程的资源
-    if (m_threadDocuments.hasLocalData()) {
-        fz_document* doc = m_threadDocuments.localData();
-        if (doc) {
-            fz_context* ctx = m_threadContexts.hasLocalData() ?
-                                  m_threadContexts.localData() : nullptr;
-            if (ctx) {
-                fz_drop_document(ctx, doc);
-            }
-        }
+    qDebug() << "ThreadSafeRenderer: Destroying"
+             << "Thread:" << QThread::currentThreadId();
+
+    // 关闭文档
+    closeDocument();
+
+    // 销毁 context
+    if (m_context) {
+        fz_drop_context(m_context);
+        m_context = nullptr;
     }
 
-    if (m_threadContexts.hasLocalData()) {
-        fz_context* ctx = m_threadContexts.localData();
-        if (ctx) {
-            fz_drop_context(ctx);
-        }
-    }
-
-    qInfo() << "ThreadSafeRenderer: Destroyed";
+    qDebug() << "ThreadSafeRenderer: Destroyed"
+             << "Thread:" << QThread::currentThreadId();
 }
 
-fz_context* ThreadSafeRenderer::getThreadContext()
+bool ThreadSafeRenderer::initializeContext()
 {
-    if (!m_threadContexts.hasLocalData()) {
-        // 为当前线程创建新的 context
-        fz_locks_context locks;
-        locks.user = nullptr;
-        locks.lock = lock_mutex;
-        locks.unlock = unlock_mutex;
 
-        fz_context* ctx = fz_new_context(nullptr, &locks, FZ_STORE_DEFAULT);
-        if (!ctx) {
-            qCritical() << "ThreadSafeRenderer: Failed to create thread context";
-            return nullptr;
-        }
+    m_context = fz_new_context(nullptr, nullptr, FZ_STORE_DEFAULT);
 
-        // 注册文档处理器
-        fz_try(ctx) {
-            fz_register_document_handlers(ctx);
-        }
-        fz_catch(ctx) {
-            qCritical() << "ThreadSafeRenderer: Failed to register handlers in thread";
-            fz_drop_context(ctx);
-            return nullptr;
-        }
-
-        m_threadContexts.setLocalData(ctx);
-
-        qDebug() << "ThreadSafeRenderer: Created context for thread"
-                 << QThread::currentThreadId();
+    if (!m_context) {
+        setLastError("Failed to create MuPDF context");
+        qCritical() << "ThreadSafeRenderer: Failed to create context";
+        return false;
     }
 
-    return m_threadContexts.localData();
+    // 注册文档处理器
+    fz_try(m_context) {
+        fz_register_document_handlers(m_context);
+    }
+    fz_catch(m_context) {
+        QString err = QString("Failed to register document handlers: %1")
+        .arg(fz_caught_message(m_context));
+        setLastError(err);
+        qCritical() << "ThreadSafeRenderer:" << err;
+        fz_drop_context(m_context);
+        m_context = nullptr;
+        return false;
+    }
+
+    return true;
 }
 
-fz_document* ThreadSafeRenderer::getThreadDocument(fz_context* ctx)
+bool ThreadSafeRenderer::loadDocument()
 {
-    if (!ctx) {
-        return nullptr;
+    if (!m_context) {
+        setLastError("Invalid MuPDF context");
+        return false;
     }
 
-    if (!m_threadDocuments.hasLocalData()) {
-        // 为当前线程打开文档
-        fz_document* doc = nullptr;
+    QByteArray pathUtf8 = m_documentPath.toUtf8();
 
-        QByteArray pathUtf8 = m_documentPath.toUtf8();
-        fz_try(ctx) {
-            doc = fz_open_document(ctx, pathUtf8.constData());
+    fz_try(m_context) {
+        m_document = fz_open_document(m_context, pathUtf8.constData());
+        m_pageCount = fz_count_pages(m_context, m_document);
 
-            // 只在第一次打开时记录页数
-            if (m_pageCount == 0) {
-                QMutexLocker locker(&m_cleanupMutex);
-                if (m_pageCount == 0) {  // 双重检查
-                    m_pageCount = fz_count_pages(ctx, doc);
-                    qInfo() << "ThreadSafeRenderer: Document has" << m_pageCount << "pages";
-                }
-            }
-        }
-        fz_catch(ctx) {
-            qCritical() << "ThreadSafeRenderer: Failed to open document:"
-                        << fz_caught_message(ctx);
-            return nullptr;
-        }
-
-        m_threadDocuments.setLocalData(doc);
-
-        qDebug() << "ThreadSafeRenderer: Opened document for thread"
-                 << QThread::currentThreadId();
+        qInfo() << "ThreadSafeRenderer: Loaded document with"
+                << m_pageCount << "pages";
+    }
+    fz_catch(m_context) {
+        QString err = QString("Failed to open document: %1")
+        .arg(fz_caught_message(m_context));
+        setLastError(err);
+        qCritical() << "ThreadSafeRenderer:" << err;
+        m_document = nullptr;
+        m_pageCount = 0;
+        return false;
     }
 
-    return m_threadDocuments.localData();
+    return true;
+}
+
+void ThreadSafeRenderer::closeDocument()
+{
+    if (m_document && m_context) {
+        fz_drop_document(m_context, m_document);
+        m_document = nullptr;
+        m_pageCount = 0;
+    }
+}
+
+bool ThreadSafeRenderer::isDocumentLoaded() const
+{
+    return m_document != nullptr;
+}
+
+int ThreadSafeRenderer::pageCount() const
+{
+    return m_pageCount;
 }
 
 QImage ThreadSafeRenderer::renderPage(int pageIndex, double zoom, int rotation)
 {
-    if (pageIndex < 0 || (m_pageCount > 0 && pageIndex >= m_pageCount)) {
+    QMutexLocker locker(&m_mutex);
+
+    if (!m_document || !m_context) {
+        qWarning() << "ThreadSafeRenderer: No document loaded";
+        return QImage();
+    }
+
+    if (pageIndex < 0 || pageIndex >= m_pageCount) {
         qWarning() << "ThreadSafeRenderer: Invalid page index:" << pageIndex;
-        return QImage();
-    }
-
-    fz_context* ctx = getThreadContext();
-    if (!ctx) {
-        return QImage();
-    }
-
-    fz_document* doc = getThreadDocument(ctx);
-    if (!doc) {
         return QImage();
     }
 
     QImage result;
 
-    fz_try(ctx) {
+    fz_try(m_context) {
         // 加载页面
-        fz_page* page = fz_load_page(ctx, doc, pageIndex);
+        fz_page* page = fz_load_page(m_context, m_document, pageIndex);
 
         // 计算变换矩阵
         fz_matrix matrix = fz_scale(zoom, zoom);
@@ -141,28 +160,28 @@ QImage ThreadSafeRenderer::renderPage(int pageIndex, double zoom, int rotation)
         }
 
         // 计算边界
-        fz_rect bounds = fz_bound_page(ctx, page);
+        fz_rect bounds = fz_bound_page(m_context, page);
         bounds = fz_transform_rect(bounds, matrix);
 
         // 创建 pixmap
         fz_pixmap* pixmap = fz_new_pixmap_with_bbox(
-            ctx,
-            fz_device_rgb(ctx),
+            m_context,
+            fz_device_rgb(m_context),
             fz_round_rect(bounds),
             nullptr,
             0
             );
-        fz_clear_pixmap_with_value(ctx, pixmap, 0xff);
+        fz_clear_pixmap_with_value(m_context, pixmap, 0xff);
 
         // 渲染
-        fz_device* device = fz_new_draw_device(ctx, fz_identity, pixmap);
-        fz_run_page(ctx, page, device, matrix, nullptr);
+        fz_device* device = fz_new_draw_device(m_context, fz_identity, pixmap);
+        fz_run_page(m_context, page, device, matrix, nullptr);
 
         // 转换为 QImage
-        int width = fz_pixmap_width(ctx, pixmap);
-        int height = fz_pixmap_height(ctx, pixmap);
-        int stride = fz_pixmap_stride(ctx, pixmap);
-        unsigned char* samples = fz_pixmap_samples(ctx, pixmap);
+        int width = fz_pixmap_width(m_context, pixmap);
+        int height = fz_pixmap_height(m_context, pixmap);
+        int stride = fz_pixmap_stride(m_context, pixmap);
+        unsigned char* samples = fz_pixmap_samples(m_context, pixmap);
 
         result = QImage(width, height, QImage::Format_RGB888);
         for (int y = 0; y < height; ++y) {
@@ -172,14 +191,17 @@ QImage ThreadSafeRenderer::renderPage(int pageIndex, double zoom, int rotation)
         }
 
         // 清理
-        fz_close_device(ctx, device);
-        fz_drop_device(ctx, device);
-        fz_drop_pixmap(ctx, pixmap);
-        fz_drop_page(ctx, page);
+        fz_close_device(m_context, device);
+        fz_drop_device(m_context, device);
+        fz_drop_pixmap(m_context, pixmap);
+        fz_drop_page(m_context, page);
     }
-    fz_catch(ctx) {
-        qWarning() << "ThreadSafeRenderer: Failed to render page" << pageIndex
-                   << ":" << fz_caught_message(ctx);
+    fz_catch(m_context) {
+        QString err = QString("Failed to render page %1: %2")
+        .arg(pageIndex)
+            .arg(fz_caught_message(m_context));
+        setLastError(err);
+        qWarning() << "ThreadSafeRenderer:" << err;
         result = QImage();
     }
 
@@ -188,33 +210,43 @@ QImage ThreadSafeRenderer::renderPage(int pageIndex, double zoom, int rotation)
 
 QSizeF ThreadSafeRenderer::getPageSize(int pageIndex)
 {
-    if (pageIndex < 0 || (m_pageCount > 0 && pageIndex >= m_pageCount)) {
+    QMutexLocker locker(&m_mutex);
+
+    if (!m_document || !m_context) {
         return QSizeF();
     }
 
-    fz_context* ctx = getThreadContext();
-    if (!ctx) {
-        return QSizeF();
-    }
-
-    fz_document* doc = getThreadDocument(ctx);
-    if (!doc) {
+    if (pageIndex < 0 || pageIndex >= m_pageCount) {
         return QSizeF();
     }
 
     QSizeF size;
 
-    fz_try(ctx) {
-        fz_page* page = fz_load_page(ctx, doc, pageIndex);
-        fz_rect bounds = fz_bound_page(ctx, page);
+    fz_try(m_context) {
+        fz_page* page = fz_load_page(m_context, m_document, pageIndex);
+        fz_rect bounds = fz_bound_page(m_context, page);
         size.setWidth(bounds.x1 - bounds.x0);
         size.setHeight(bounds.y1 - bounds.y0);
-        fz_drop_page(ctx, page);
+        fz_drop_page(m_context, page);
     }
-    fz_catch(ctx) {
-        qWarning() << "ThreadSafeRenderer: Failed to get page size" << pageIndex;
+    fz_catch(m_context) {
+        QString err = QString("Failed to get page size for %1: %2")
+        .arg(pageIndex)
+            .arg(fz_caught_message(m_context));
+        setLastError(err);
+        qWarning() << "ThreadSafeRenderer:" << err;
         size = QSizeF();
     }
 
     return size;
+}
+
+QString ThreadSafeRenderer::getLastError() const
+{
+    return m_lastError;
+}
+
+void ThreadSafeRenderer::setLastError(const QString& error)
+{
+    m_lastError = error;
 }

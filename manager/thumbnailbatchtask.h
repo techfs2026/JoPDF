@@ -43,7 +43,7 @@ public:
      * @param highResWidth 高清宽度
      * @param rotation 旋转角度
      */
-    explicit ThumbnailBatchTask(ThreadSafeRenderer* renderer,
+    explicit ThumbnailBatchTask(const QString& docPath,
                                 ThumbnailCache* cache,
                                 ThumbnailManager* manager,
                                 const QVector<int>& pageIndices,
@@ -71,7 +71,7 @@ public:
     bool isAborted() const;
 
 private:
-    ThreadSafeRenderer* m_renderer;
+    std::unique_ptr<ThreadSafeRenderer> m_renderer;
     QPointer<ThumbnailManager> m_manager;
     ThumbnailCache* m_cache;
     QVector<int> m_pageIndices;
