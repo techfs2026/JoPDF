@@ -6,6 +6,7 @@
 #include "outlineeditor.h"
 #include <QDebug>
 #include <QFileInfo>
+#include <QTimer>
 
 PDFContentHandler::PDFContentHandler(MuPDFRenderer* renderer, QObject* parent)
     : QObject(parent)
@@ -18,12 +19,10 @@ PDFContentHandler::PDFContentHandler(MuPDFRenderer* renderer, QObject* parent)
         return;
     }
 
-    // 创建子管理器
     m_outlineManager = std::make_unique<OutlineManager>(m_renderer, this);
     m_thumbnailManager = std::make_unique<ThumbnailManager>(m_renderer, this);
     m_outlineEditor = std::make_unique<OutlineEditor>(m_renderer, this);
 
-    // 连接信号
     setupConnections();
 }
 
@@ -42,12 +41,10 @@ bool PDFContentHandler::loadDocument(const QString& filePath, QString* errorMess
         return false;
     }
 
-    // 关闭当前文档
     if (isDocumentLoaded()) {
         closeDocument();
     }
 
-    // 加载新文档
     QString error;
     if (!m_renderer->loadDocument(filePath, &error)) {
         if (errorMessage) {
@@ -74,12 +71,10 @@ void PDFContentHandler::closeDocument()
         return;
     }
 
-    // 关闭文档
     if (m_renderer) {
         m_renderer->closeDocument();
     }
 
-    // 清空数据
     clearOutline();
     clearThumbnails();
 
@@ -117,7 +112,6 @@ bool PDFContentHandler::loadOutline()
 
     bool success = m_outlineManager->loadOutline();
 
-    // 同步到编辑器
     if (success && m_outlineEditor) {
         m_outlineEditor->setRoot(m_outlineManager->root());
     }
@@ -155,6 +149,93 @@ void PDFContentHandler::clearOutline()
 
 // ========== 缩略图管理 (新版智能管理器) ==========
 
+void PDFContentHandler::loadThumbnails()
+{
+    if (!isDocumentLoaded()) {
+        qWarning() << "PDFContentHandler: Cannot load thumbnails - no document loaded";
+        return;
+    }
+
+    if (!m_thumbnailManager) {
+        qWarning() << "PDFContentHandler: Thumbnail manager not initialized";
+        return;
+    }
+
+    int pageCount = m_renderer->pageCount();
+
+    qInfo() << "PDFContentHandler: Starting thumbnail loading for" << pageCount << "pages";
+
+    // 通知UI初始化完成
+    emit thumbnailsInitialized(pageCount);
+}
+
+void PDFContentHandler::handleVisibleRangeChanged(const QSet<int>& visibleIndices, int margin)
+{
+    if (!m_thumbnailManager || visibleIndices.isEmpty()) {
+        return;
+    }
+
+    QVector<int> visiblePages = visibleIndices.values().toVector();
+
+    // 区分严格可见区域和预加载区域
+    QSet<int> strictVisible = (margin == 0) ? visibleIndices : QSet<int>();
+
+    if (strictVisible.isEmpty()) {
+        // 这是带margin的可见区域，可能包含预加载
+        // 先渲染立即可见的高清
+        m_thumbnailManager->renderHighResAsync(visiblePages, RenderPriority::HIGH);
+    } else {
+        // 这是严格可见区域
+        // 立即同步渲染低清
+        m_thumbnailManager->renderLowResImmediate(visiblePages);
+        // 然后异步渲染高清
+        m_thumbnailManager->renderHighResAsync(visiblePages, RenderPriority::HIGH);
+    }
+}
+
+void PDFContentHandler::startInitialThumbnailLoad(const QSet<int>& initialVisible)
+{
+    if (!m_thumbnailManager || initialVisible.isEmpty()) {
+        return;
+    }
+
+    QVector<int> visiblePages = initialVisible.values().toVector();
+
+    qDebug() << "PDFContentHandler: Initial thumbnail load for" << visiblePages.size() << "pages";
+
+    // 1. 立即同步渲染可见区域的低清缩略图
+    m_thumbnailManager->renderLowResImmediate(visiblePages);
+
+    // 2. 异步渲染可见区域的高清缩略图
+    m_thumbnailManager->renderHighResAsync(visiblePages, RenderPriority::HIGH);
+
+    // 3. 延迟启动全文档低清渲染
+    QTimer::singleShot(1000, this, &PDFContentHandler::startBackgroundLowResRendering);
+}
+
+void PDFContentHandler::startBackgroundLowResRendering()
+{
+    if (!m_thumbnailManager || !m_renderer) {
+        return;
+    }
+
+    int pageCount = m_renderer->pageCount();
+    if (pageCount == 0) {
+        return;
+    }
+
+    QVector<int> allPages;
+    allPages.reserve(pageCount);
+    for (int i = 0; i < pageCount; ++i) {
+        allPages.append(i);
+    }
+
+    qDebug() << "PDFContentHandler: Starting background low-res rendering for"
+             << pageCount << "pages";
+
+    m_thumbnailManager->renderLowResAsync(allPages);
+}
+
 QImage PDFContentHandler::getThumbnail(int pageIndex, bool preferHighRes) const
 {
     if (!m_thumbnailManager) {
@@ -183,42 +264,6 @@ void PDFContentHandler::setThumbnailRotation(int rotation)
 {
     if (m_thumbnailManager) {
         m_thumbnailManager->setRotation(rotation);
-    }
-}
-
-void PDFContentHandler::renderLowResImmediate(const QVector<int>& pageIndices)
-{
-    if (m_thumbnailManager) {
-        m_thumbnailManager->renderLowResImmediate(pageIndices);
-    }
-}
-
-void PDFContentHandler::renderHighResAsync(const QVector<int>& pageIndices, int priority)
-{
-    if (m_thumbnailManager) {
-        RenderPriority renderPriority = RenderPriority::MEDIUM;
-        switch (priority) {
-        case 3:
-            renderPriority = RenderPriority::IMMEDIATE;
-            break;
-        case 2:
-            renderPriority = RenderPriority::HIGH;
-            break;
-        case 1:
-            renderPriority = RenderPriority::MEDIUM;
-            break;
-        case 0:
-            renderPriority = RenderPriority::LOW;
-            break;
-        }
-        m_thumbnailManager->renderHighResAsync(pageIndices, renderPriority);
-    }
-}
-
-void PDFContentHandler::renderLowResAsync(const QVector<int>& pageIndices)
-{
-    if (m_thumbnailManager) {
-        m_thumbnailManager->renderLowResAsync(pageIndices);
     }
 }
 
@@ -265,13 +310,11 @@ void PDFContentHandler::reset()
 
 void PDFContentHandler::setupConnections()
 {
-    // 连接 OutlineManager 信号
     if (m_outlineManager) {
         connect(m_outlineManager.get(), &OutlineManager::outlineLoaded,
                 this, &PDFContentHandler::outlineLoaded);
     }
 
-    // 连接 ThumbnailManager 信号
     if (m_thumbnailManager) {
         connect(m_thumbnailManager.get(), &ThumbnailManager::thumbnailLoaded,
                 this, &PDFContentHandler::thumbnailLoaded);
@@ -280,7 +323,6 @@ void PDFContentHandler::setupConnections()
                 this, &PDFContentHandler::thumbnailLoadProgress);
     }
 
-    // 连接 OutlineEditor 信号
     if (m_outlineEditor) {
         connect(m_outlineEditor.get(), &OutlineEditor::outlineModified,
                 this, &PDFContentHandler::outlineModified);

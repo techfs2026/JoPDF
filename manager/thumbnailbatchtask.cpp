@@ -109,7 +109,7 @@ void ThumbnailBatchTask::run()
         }
 
         if (m_manager) {
-            QMetaObject::invokeMethod(m_manager.data(), "thumbnailLoaded",
+            QMetaObject::invokeMethod(m_manager, "thumbnailLoaded",
                                       Qt::QueuedConnection,
                                       Q_ARG(int, pageIndex),
                                       Q_ARG(QImage, thumbnail),

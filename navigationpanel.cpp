@@ -4,16 +4,13 @@
 #include "pdfdocumentsession.h"
 #include "pdfcontenthandler.h"
 #include "outlineeditor.h"
-#include "thumbnailmanager.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QDesktopServices>
 #include <QUrl>
 #include <QMessageBox>
-#include <QToolBar>
 #include <QToolButton>
-#include <QLabel>
 #include <QDebug>
 
 NavigationPanel::NavigationPanel(PDFDocumentSession* session, QWidget* parent)
@@ -37,9 +34,7 @@ NavigationPanel::NavigationPanel(PDFDocumentSession* session, QWidget* parent)
 NavigationPanel::~NavigationPanel()
 {
     qDebug() << "NavigationPanel: Destructor called";
-
     clear();
-
     qDebug() << "NavigationPanel: Destructor finished";
 }
 
@@ -51,19 +46,20 @@ void NavigationPanel::loadDocument(int pageCount)
         return;
     }
 
-    // 加载大纲
+    qInfo() << "NavigationPanel: Loading document with" << pageCount << "pages";
+
+    // 通过Session加载大纲
     bool hasOutline = m_session->loadOutline();
     if (hasOutline) {
-        m_outlineWidget->loadOutline();
-        qInfo() << "NavigationPanel: Outline loaded";
+        qInfo() << "NavigationPanel: Outline available";
     } else {
         qInfo() << "NavigationPanel: No outline available";
     }
 
-    // 加载缩略图 (使用新版智能加载器)
-    m_thumbnailWidget->loadThumbnails(pageCount);
+    // 通过Session加载缩略图
+    m_session->loadThumbnails();
 
-    // 默认显示缩略图标签页
+    // 默认显示标签页
     if (hasOutline) {
         m_tabWidget->setCurrentIndex(0); // 大纲
     } else {
@@ -73,32 +69,31 @@ void NavigationPanel::loadDocument(int pageCount)
 
 void NavigationPanel::clear()
 {
-    m_outlineWidget->clear();
-    m_thumbnailWidget->clear();
+    if (m_outlineWidget) {
+        m_outlineWidget->clear();
+    }
+    if (m_thumbnailWidget) {
+        m_thumbnailWidget->clear();
+    }
 }
 
 void NavigationPanel::updateCurrentPage(int pageIndex)
 {
-    // 更新大纲高亮
     if (m_outlineWidget) {
         m_outlineWidget->highlightCurrentPage(pageIndex);
     }
 
-    // 更新缩略图高亮
     if (m_thumbnailWidget) {
         m_thumbnailWidget->highlightCurrentPage(pageIndex);
     }
 }
 
-
 void NavigationPanel::setupUI()
 {
-    // 创建主容器
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
-    // 创建标签页组件
     m_tabWidget = new QTabWidget(this);
     m_tabWidget->setObjectName("navigationTabWidget");
     m_tabWidget->setDocumentMode(true);
@@ -121,7 +116,6 @@ void NavigationPanel::setupUI()
     toolbarLayout->setContentsMargins(12, 8, 12, 8);
     toolbarLayout->setSpacing(8);
 
-    // 展开全部按钮
     m_expandAllBtn = new QToolButton(this);
     m_expandAllBtn->setIcon(QIcon(":/icons/icons/expand.png"));
     m_expandAllBtn->setToolTip(tr("展开全部"));
@@ -129,7 +123,6 @@ void NavigationPanel::setupUI()
     m_expandAllBtn->setFixedSize(28, 28);
     m_expandAllBtn->setIconSize(QSize(14, 14));
 
-    // 折叠全部按钮
     m_collapseAllBtn = new QToolButton(this);
     m_collapseAllBtn->setIcon(QIcon(":/icons/icons/fold.png"));
     m_collapseAllBtn->setToolTip(tr("折叠全部"));
@@ -141,7 +134,6 @@ void NavigationPanel::setupUI()
     toolbarLayout->addWidget(m_expandAllBtn);
     toolbarLayout->addWidget(m_collapseAllBtn);
 
-    // 创建大纲视图
     m_outlineWidget = new OutlineWidget(m_session->contentHandler(), this);
     m_outlineWidget->setMinimumWidth(0);
     m_outlineWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -155,29 +147,17 @@ void NavigationPanel::setupUI()
 
     m_tabWidget->addTab(outlineTab, tr("目录"));
 
-    // ========== 缩略图标签页 (新版智能管理器) ==========
-
-    // 获取 ThumbnailManager
-    ThumbnailManager* thumbnailManager = nullptr;
-    if (m_session->contentHandler()) {
-        thumbnailManager = m_session->contentHandler()->thumbnailManager();
-    }
-
-    m_thumbnailWidget = new ThumbnailWidget(
-        m_session,
-        this
-        );
+    // ========== 缩略图标签页 ==========
+    m_thumbnailWidget = new ThumbnailWidget(this);
     m_thumbnailWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_thumbnailWidget->setMinimumWidth(0);
 
     m_tabWidget->addTab(m_thumbnailWidget, tr("缩略图"));
 
-    // 添加到主布局
     mainLayout->addWidget(m_tabWidget, 1);
 
     // 应用样式
     QString style = R"(
-        /* 标签页样式 */
         #navigationTabWidget {
             background-color: #FFFFFF;
             border: none;
@@ -213,13 +193,11 @@ void NavigationPanel::setupUI()
             color: #000000;
         }
 
-        /* 工具栏样式 */
         #outlineToolbar {
             background-color: #FAFAFA;
             border-bottom: 1px solid #E8E8E8;
         }
 
-        /* 工具按钮样式 */
         #outlineToolButton {
             background-color: transparent;
             border: 1px solid #D1D1D6;
@@ -249,15 +227,11 @@ void NavigationPanel::setupUI()
 void NavigationPanel::setupConnections()
 {
     // ========== OutlineWidget信号 ==========
-
-    // 大纲跳转信号
     connect(m_outlineWidget, &OutlineWidget::pageJumpRequested,
             this, &NavigationPanel::pageJumpRequested);
 
-    // 大纲外部链接信号
     connect(m_outlineWidget, &OutlineWidget::externalLinkRequested,
             this, [this](const QString& uri) {
-                // 打开外部链接
                 QUrl url(uri);
                 if (url.isValid()) {
                     if (!QDesktopServices::openUrl(url)) {
@@ -268,30 +242,32 @@ void NavigationPanel::setupConnections()
                     QMessageBox::warning(this, tr("Invalid Link"),
                                          tr("Invalid link URI:\n%1").arg(uri));
                 }
-
                 emit externalLinkRequested(uri);
             });
 
-    // 大纲项修改信号
     if (m_session->contentHandler()) {
         connect(m_session->contentHandler(), &PDFContentHandler::outlineModified,
                 this, &NavigationPanel::outlineModified);
     }
 
-    // 连接展开/折叠按钮
     connect(m_expandAllBtn, &QToolButton::clicked,
             m_outlineWidget, &OutlineWidget::expandAll);
     connect(m_collapseAllBtn, &QToolButton::clicked,
             m_outlineWidget, &OutlineWidget::collapseAll);
 
-    // ========== ThumbnailWidget信号 (新版) ==========
-
-    // 缩略图跳转信号
+    // ========== ThumbnailWidget信号 ==========
     connect(m_thumbnailWidget, &ThumbnailWidget::pageJumpRequested,
             this, &NavigationPanel::pageJumpRequested);
 
-    // ========== Session信号连接 ==========
+    // 监听ThumbnailWidget的可见区域变化，通知ContentHandler加载
+    connect(m_thumbnailWidget, &ThumbnailWidget::visibleRangeChanged,
+            this, [this](const QSet<int>& visibleIndices, int margin) {
+                if (m_session && m_session->contentHandler()) {
+                    m_session->contentHandler()->handleVisibleRangeChanged(visibleIndices, margin);
+                }
+            });
 
+    // ========== Session信号连接 ==========
     if (m_session) {
         // 大纲加载完成
         connect(m_session, &PDFDocumentSession::outlineLoaded,
@@ -302,8 +278,15 @@ void NavigationPanel::setupConnections()
                     }
                 });
 
-        // 缩略图信号
-        connect(m_session, &PDFDocumentSession::thumbnailLoaded,
+        // 缩略图初始化完成 - UI创建占位符
+        connect(m_session->contentHandler(), &PDFContentHandler::thumbnailsInitialized,
+                this, [this](int pageCount) {
+                    qInfo() << "NavigationPanel: Initializing" << pageCount << "thumbnail placeholders";
+                    m_thumbnailWidget->initializeThumbnails(pageCount);
+                });
+
+        // 缩略图加载完成 - UI更新图片
+        connect(m_session->contentHandler(), &PDFContentHandler::thumbnailLoaded,
                 m_thumbnailWidget, &ThumbnailWidget::onThumbnailLoaded);
 
         // 编辑器保存完成信号

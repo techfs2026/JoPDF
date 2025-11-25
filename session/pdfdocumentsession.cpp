@@ -301,6 +301,13 @@ OutlineEditor* PDFDocumentSession::outlineEditor() const
     return m_contentHandler ? m_contentHandler->outlineEditor() : nullptr;
 }
 
+void PDFDocumentSession::loadThumbnails()
+{
+    if (m_contentHandler) {
+        m_contentHandler->loadThumbnails();
+    }
+}
+
 QImage PDFDocumentSession::getThumbnail(int pageIndex, bool preferHighRes) const
 {
     return m_contentHandler ?
@@ -326,27 +333,6 @@ void PDFDocumentSession::setThumbnailRotation(int rotation)
 {
     if (m_contentHandler) {
         m_contentHandler->setThumbnailRotation(rotation);
-    }
-}
-
-void PDFDocumentSession::renderLowResImmediate(const QVector<int>& pageIndices)
-{
-    if (m_contentHandler) {
-        m_contentHandler->renderLowResImmediate(pageIndices);
-    }
-}
-
-void PDFDocumentSession::renderHighResAsync(const QVector<int>& pageIndices, int priority)
-{
-    if (m_contentHandler) {
-        m_contentHandler->renderHighResAsync(pageIndices, priority);
-    }
-}
-
-void PDFDocumentSession::renderLowResAsync(const QVector<int>& pageIndices)
-{
-    if (m_contentHandler) {
-        m_contentHandler->renderLowResAsync(pageIndices);
     }
 }
 
