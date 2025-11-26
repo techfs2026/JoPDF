@@ -2,14 +2,14 @@
 #define NAVIGATIONPANEL_H
 
 #include <QWidget>
+#include <QTabWidget>
+#include <QLabel>
+#include <QProgressBar>
 
-// Forward declarations
-class PDFDocumentSession;  // 新增:从Session获取所有组件
+class PDFDocumentSession;
 class OutlineWidget;
 class ThumbnailWidget;
-class QTabWidget;
 class QToolButton;
-class QImage;
 
 class NavigationPanel : public QWidget
 {
@@ -35,16 +35,16 @@ private:
     void setupUI();
     void setupConnections();
 
-private:
-    // Session引用(不拥有所有权)
     PDFDocumentSession* m_session;
-
-    // UI组件
     QTabWidget* m_tabWidget;
     OutlineWidget* m_outlineWidget;
     ThumbnailWidget* m_thumbnailWidget;
     QToolButton* m_expandAllBtn;
     QToolButton* m_collapseAllBtn;
+
+    // 缩略图状态提示
+    QLabel* m_thumbnailStatusLabel;
+    QProgressBar* m_thumbnailProgressBar;
 };
 
 #endif // NAVIGATIONPANEL_H

@@ -168,7 +168,12 @@ void PDFContentHandler::handleVisibleRangeChanged(const QSet<int>& visibleIndice
         return;
     }
 
-    // 仅对大文档生效
+    // 检查是否应该响应滚动（只有大文档且未在批次加载中）
+    if (!m_thumbnailManager->shouldRespondToScroll()) {
+        return;
+    }
+
+    // 大文档按需加载
     m_thumbnailManager->handleVisibleRangeChanged(visibleIndices);
 }
 
@@ -191,10 +196,8 @@ void PDFContentHandler::syncLoadUnloadedPages(const QSet<int>& unloadedPages)
         return;
     }
 
-    qInfo() << "PDFContentHandler: Sync loading" << unloadedPages.size()
-            << "unloaded visible pages after scroll stop";
-
     // 转换为 QVector 并同步加载
+    // syncLoadPages 内部会检查 m_isLoadingInProgress，批次加载期间会忽略
     QVector<int> pagesToLoad = unloadedPages.values().toVector();
     m_thumbnailManager->syncLoadPages(pagesToLoad);
 }

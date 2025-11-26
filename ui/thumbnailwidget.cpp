@@ -1,4 +1,5 @@
 #include "thumbnailwidget.h"
+#include "thumbnailmanagerv2.h"
 #include <QVBoxLayout>
 #include <QMouseEvent>
 #include <QPainter>
@@ -7,7 +8,6 @@
 #include <QScrollBar>
 #include <QDebug>
 #include <QDateTime>
-#include <QPropertyAnimation>
 
 ThumbnailWidget::ThumbnailWidget(QWidget* parent)
     : QScrollArea(parent)
@@ -17,6 +17,7 @@ ThumbnailWidget::ThumbnailWidget(QWidget* parent)
     , m_currentPage(-1)
     , m_columnsPerRow(2)
     , m_scrollState(ScrollState::IDLE)
+    , m_manager(nullptr)
 {
     m_container = new QWidget(this);
     m_layout = new QGridLayout(m_container);
@@ -52,10 +53,13 @@ ThumbnailWidget::ThumbnailWidget(QWidget* parent)
 ThumbnailWidget::~ThumbnailWidget()
 {
     qDebug() << "ThumbnailWidget: Destructor called";
-
     clear();
-
     qDebug() << "ThumbnailWidget: Destructor finished";
+}
+
+void ThumbnailWidget::setThumbnailManager(ThumbnailManagerV2* manager)
+{
+    m_manager = manager;
 }
 
 void ThumbnailWidget::initializeThumbnails(int pageCount)
@@ -72,6 +76,11 @@ void ThumbnailWidget::initializeThumbnails(int pageCount)
     int availableWidth = viewport()->width() - 2 * THUMBNAIL_SPACING;
     int itemWidth = m_thumbnailWidth + 20;
     m_columnsPerRow = qMax(1, availableWidth / itemWidth);
+
+    qDebug() << "ThumbnailWidget: viewport width =" << viewport()->width()
+             << ", availableWidth =" << availableWidth
+             << ", itemWidth =" << itemWidth
+             << ", columns =" << m_columnsPerRow;
 
     m_itemRects.resize(pageCount);
 
@@ -92,10 +101,10 @@ void ThumbnailWidget::initializeThumbnails(int pageCount)
 
     qInfo() << "ThumbnailWidget: Created" << pageCount << "placeholder items";
 
-
+    // 延迟发送初始可见信号
     QTimer::singleShot(100, this, [this]() {
         QSet<int> initialVisible = getVisibleIndices(0);
-        emit initialVisibleReady(initialVisible);  // 新增信号
+        emit initialVisibleReady(initialVisible);
     });
 }
 
@@ -157,14 +166,14 @@ void ThumbnailWidget::setThumbnailSize(int width)
     }
 }
 
-void ThumbnailWidget::onThumbnailLoaded(int pageIndex, const QImage& thumbnail, bool isHighRes)
+void ThumbnailWidget::onThumbnailLoaded(int pageIndex, const QImage& thumbnail)
 {
     if (!m_thumbnailItems.contains(pageIndex)) {
         return;
     }
 
     ThumbnailItem* item = m_thumbnailItems[pageIndex];
-    item->setThumbnail(thumbnail, isHighRes);
+    item->setThumbnail(thumbnail);
 }
 
 void ThumbnailWidget::scrollContentsBy(int dx, int dy)
@@ -211,7 +220,10 @@ void ThumbnailWidget::resizeEvent(QResizeEvent* event)
 
 void ThumbnailWidget::onScrollThrottle()
 {
-    notifyVisibleRange();
+    // 只有在应该响应滚动时才通知
+    if (m_manager && m_manager->shouldRespondToScroll()) {
+        notifyVisibleRange();
+    }
 }
 
 void ThumbnailWidget::onScrollDebounce()
@@ -221,6 +233,12 @@ void ThumbnailWidget::onScrollDebounce()
 
     qDebug() << "ThumbnailWidget: Scroll stopped";
 
+    // 检查是否应该响应滚动（避免批次加载期间触发）
+    if (m_manager && !m_manager->shouldRespondToScroll()) {
+        qDebug() << "ThumbnailWidget: Ignoring scroll stop during batch loading";
+        return;
+    }
+
     // 检查可见区域是否有未加载的占位页
     QSet<int> unloadedVisible = getUnloadedVisiblePages();
 
@@ -228,12 +246,13 @@ void ThumbnailWidget::onScrollDebounce()
         qInfo() << "ThumbnailWidget: Found" << unloadedVisible.size()
         << "unloaded visible pages after scroll stop, triggering sync load";
 
-        // 发送需要同步加载的信号
         emit syncLoadRequested(unloadedVisible);
     }
 
     // 继续正常的可见区域通知（用于预加载周边页面）
-    notifyVisibleRange();
+    if (m_manager && m_manager->shouldRespondToScroll()) {
+        notifyVisibleRange();
+    }
 }
 
 void ThumbnailWidget::onThumbnailClicked(int pageIndex)
@@ -366,7 +385,7 @@ QSet<int> ThumbnailWidget::getUnloadedVisiblePages() const
     for (int pageIndex : visible) {
         if (m_thumbnailItems.contains(pageIndex)) {
             ThumbnailItem* item = m_thumbnailItems[pageIndex];
-            if (!item->hasImage()) {  // 判断是否还是占位符
+            if (!item->hasImage()) {
                 unloaded.insert(pageIndex);
             }
         }
@@ -384,7 +403,6 @@ ThumbnailItem::ThumbnailItem(int pageIndex, int width, QWidget* parent)
     , m_pageIndex(pageIndex)
     , m_width(width)
     , m_hasImage(false)
-    , m_isHighRes(false)
     , m_isHighlighted(false)
     , m_isHovered(false)
 {
@@ -431,7 +449,6 @@ ThumbnailItem::ThumbnailItem(int pageIndex, int width, QWidget* parent)
 void ThumbnailItem::setPlaceholder(const QString& text)
 {
     m_hasImage = false;
-    m_isHighRes = false;
     m_imageLabel->setText(text);
     m_imageLabel->setStyleSheet(
         "QLabel { "
@@ -447,19 +464,14 @@ void ThumbnailItem::setPlaceholder(const QString& text)
     m_imageLabel->setFont(font);
 }
 
-void ThumbnailItem::setThumbnail(const QImage& image, bool isHighRes)
+void ThumbnailItem::setThumbnail(const QImage& image)
 {
     if (image.isNull()) {
         setError(tr("Load failed"));
         return;
     }
 
-    if (m_isHighRes) {
-        return;
-    }
-
     m_hasImage = true;
-    m_isHighRes = isHighRes;
 
     QImage scaled = image.scaled(
         m_imageLabel->size(),
@@ -472,20 +484,11 @@ void ThumbnailItem::setThumbnail(const QImage& image, bool isHighRes)
     m_imageLabel->setText(QString());
 
     updateStyle();
-
-    if (isHighRes) {
-        QPropertyAnimation* animation = new QPropertyAnimation(m_imageLabel, "windowOpacity");
-        animation->setDuration(100);
-        animation->setStartValue(0.5);
-        animation->setEndValue(1.0);
-        animation->start(QAbstractAnimation::DeleteWhenStopped);
-    }
 }
 
 void ThumbnailItem::setError(const QString& error)
 {
     m_hasImage = false;
-    m_isHighRes = false;
     m_imageLabel->setText(error);
     m_imageLabel->setStyleSheet(
         "QLabel { "

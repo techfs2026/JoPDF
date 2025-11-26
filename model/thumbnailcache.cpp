@@ -10,95 +10,48 @@ ThumbnailCache::~ThumbnailCache()
 {
 }
 
-// ========== 低清缓存 ==========
-
-QImage ThumbnailCache::getLowRes(int pageIndex) const
+QImage ThumbnailCache::get(int pageIndex) const
 {
-    QReadLocker locker(&m_lowResLock);
-    return m_lowResCache.value(pageIndex, QImage());
+    QReadLocker locker(&m_lock);
+    return m_cache.value(pageIndex, QImage());
 }
 
-void ThumbnailCache::setLowRes(int pageIndex, const QImage& thumbnail)
+void ThumbnailCache::set(int pageIndex, const QImage& thumbnail)
 {
     if (thumbnail.isNull()) {
         return;
     }
 
-    QWriteLocker locker(&m_lowResLock);
-    m_lowResCache[pageIndex] = thumbnail;
+    QWriteLocker locker(&m_lock);
+    m_cache[pageIndex] = thumbnail;
 }
 
-bool ThumbnailCache::hasLowRes(int pageIndex) const
+bool ThumbnailCache::has(int pageIndex) const
 {
-    QReadLocker locker(&m_lowResLock);
-    return m_lowResCache.contains(pageIndex);
+    QReadLocker locker(&m_lock);
+    return m_cache.contains(pageIndex);
 }
-
-// ========== 高清缓存 ==========
-
-QImage ThumbnailCache::getHighRes(int pageIndex) const
-{
-    QReadLocker locker(&m_highResLock);
-    return m_highResCache.value(pageIndex, QImage());
-}
-
-void ThumbnailCache::setHighRes(int pageIndex, const QImage& thumbnail)
-{
-    if (thumbnail.isNull()) {
-        return;
-    }
-
-    QWriteLocker locker(&m_highResLock);
-    m_highResCache[pageIndex] = thumbnail;
-}
-
-bool ThumbnailCache::hasHighRes(int pageIndex) const
-{
-    QReadLocker locker(&m_highResLock);
-    return m_highResCache.contains(pageIndex);
-}
-
-// ========== 管理方法 ==========
 
 void ThumbnailCache::clear()
 {
-    {
-        QWriteLocker locker(&m_lowResLock);
-        m_lowResCache.clear();
-    }
-
-    {
-        QWriteLocker locker(&m_highResLock);
-        m_highResCache.clear();
-    }
+    QWriteLocker locker(&m_lock);
+    m_cache.clear();
 }
 
 QString ThumbnailCache::getStatistics() const
 {
-    int lowCount = lowResCount();
-    int highCount = highResCount();
+    int cachedCount = count();
 
-    // 估算内存占用（低清 5KB/页，高清 150KB/页）
-    qint64 lowMemory = lowCount * 5;      // KB
-    qint64 highMemory = highCount * 150;   // KB
-    qint64 totalMemory = lowMemory + highMemory;
+    // 估算内存占用（平均 50KB/页）
+    qint64 memoryKB = cachedCount * 50;
 
-    return QString("Thumbnail Cache: Low=%1 (%.2 MB), High=%3 (%.4 MB), Total=%.5 MB")
-        .arg(lowCount)
-        .arg(lowMemory / 1024.0, 0, 'f', 2)
-        .arg(highCount)
-        .arg(highMemory / 1024.0, 0, 'f', 2)
-        .arg(totalMemory / 1024.0, 0, 'f', 2);
+    return QString("Thumbnail Cache: %1 pages (%.2 MB)")
+        .arg(cachedCount)
+        .arg(memoryKB / 1024.0, 0, 'f', 2);
 }
 
-int ThumbnailCache::lowResCount() const
+int ThumbnailCache::count() const
 {
-    QReadLocker locker(&m_lowResLock);
-    return m_lowResCache.size();
-}
-
-int ThumbnailCache::highResCount() const
-{
-    QReadLocker locker(&m_highResLock);
-    return m_highResCache.size();
+    QReadLocker locker(&m_lock);
+    return m_cache.size();
 }

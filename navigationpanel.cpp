@@ -4,6 +4,7 @@
 #include "pdfdocumentsession.h"
 #include "pdfcontenthandler.h"
 #include "outlineeditor.h"
+#include "thumbnailmanagerv2.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -11,6 +12,7 @@
 #include <QUrl>
 #include <QMessageBox>
 #include <QToolButton>
+#include <QTimer>
 #include <QDebug>
 
 NavigationPanel::NavigationPanel(PDFDocumentSession* session, QWidget* parent)
@@ -21,6 +23,8 @@ NavigationPanel::NavigationPanel(PDFDocumentSession* session, QWidget* parent)
     , m_thumbnailWidget(nullptr)
     , m_expandAllBtn(nullptr)
     , m_collapseAllBtn(nullptr)
+    , m_thumbnailStatusLabel(nullptr)
+    , m_thumbnailProgressBar(nullptr)
 {
     if (!m_session) {
         qCritical() << "NavigationPanel: session is null!";
@@ -74,6 +78,12 @@ void NavigationPanel::clear()
     }
     if (m_thumbnailWidget) {
         m_thumbnailWidget->clear();
+    }
+    if (m_thumbnailStatusLabel) {
+        m_thumbnailStatusLabel->setText(tr("Ready"));
+    }
+    if (m_thumbnailProgressBar) {
+        m_thumbnailProgressBar->setVisible(false);
     }
 }
 
@@ -148,11 +158,46 @@ void NavigationPanel::setupUI()
     m_tabWidget->addTab(outlineTab, tr("目录"));
 
     // ========== 缩略图标签页 ==========
+    QWidget* thumbnailTab = new QWidget(this);
+    QVBoxLayout* thumbnailLayout = new QVBoxLayout(thumbnailTab);
+    thumbnailLayout->setContentsMargins(0, 0, 0, 0);
+    thumbnailLayout->setSpacing(0);
+
     m_thumbnailWidget = new ThumbnailWidget(this);
     m_thumbnailWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_thumbnailWidget->setMinimumWidth(0);
 
-    m_tabWidget->addTab(m_thumbnailWidget, tr("缩略图"));
+    // 缩略图状态栏
+    QWidget* statusBar = new QWidget(this);
+    statusBar->setObjectName("thumbnailStatusBar");
+    statusBar->setFixedHeight(32);
+
+    QHBoxLayout* statusLayout = new QHBoxLayout(statusBar);
+    statusLayout->setContentsMargins(12, 4, 12, 4);
+    statusLayout->setSpacing(8);
+
+    m_thumbnailStatusLabel = new QLabel(tr("Ready"), this);
+    m_thumbnailStatusLabel->setObjectName("thumbnailStatusLabel");
+    QFont statusFont = m_thumbnailStatusLabel->font();
+    statusFont.setPointSize(9);
+    m_thumbnailStatusLabel->setFont(statusFont);
+
+    m_thumbnailProgressBar = new QProgressBar(this);
+    m_thumbnailProgressBar->setObjectName("thumbnailProgressBar");
+    m_thumbnailProgressBar->setMaximumWidth(150);
+    m_thumbnailProgressBar->setMaximumHeight(18);
+    m_thumbnailProgressBar->setTextVisible(true);
+    m_thumbnailProgressBar->setVisible(false);
+
+    statusLayout->addWidget(m_thumbnailStatusLabel, 1);
+    statusLayout->addWidget(m_thumbnailProgressBar);
+
+    thumbnailLayout->addWidget(m_thumbnailWidget, 1);
+    thumbnailLayout->addWidget(statusBar);
+
+    thumbnailTab->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    m_tabWidget->addTab(thumbnailTab, tr("缩略图"));
 
     mainLayout->addWidget(m_tabWidget, 1);
 
@@ -216,6 +261,27 @@ void NavigationPanel::setupUI()
         #outlineToolButton:pressed {
             background-color: #D1D1D6;
         }
+
+        #thumbnailStatusBar {
+            background-color: #FAFAFA;
+            border-top: 1px solid #E8E8E8;
+        }
+
+        #thumbnailStatusLabel {
+            color: #6B6B6B;
+        }
+
+        #thumbnailProgressBar {
+            border: 1px solid #D1D1D6;
+            border-radius: 4px;
+            text-align: center;
+            background-color: #FFFFFF;
+        }
+
+        #thumbnailProgressBar::chunk {
+            background-color: #007AFF;
+            border-radius: 3px;
+        }
     )";
 
     setStyleSheet(style);
@@ -256,6 +322,12 @@ void NavigationPanel::setupConnections()
             m_outlineWidget, &OutlineWidget::collapseAll);
 
     // ========== ThumbnailWidget信号 ==========
+    if (m_session && m_session->contentHandler() &&
+        m_session->contentHandler()->thumbnailManager()) {
+        m_thumbnailWidget->setThumbnailManager(
+            m_session->contentHandler()->thumbnailManager()
+            );
+    }
     connect(m_thumbnailWidget, &ThumbnailWidget::pageJumpRequested,
             this, &NavigationPanel::pageJumpRequested);
 
@@ -302,8 +374,10 @@ void NavigationPanel::setupConnections()
                 });
 
         // 缩略图加载完成 - UI更新图片
-        connect(m_session->contentHandler(), &PDFContentHandler::thumbnailLoaded,
-                m_thumbnailWidget, &ThumbnailWidget::onThumbnailLoaded);
+        connect(m_session, &PDFDocumentSession::thumbnailLoaded,
+                this, [this](int pageIndex, const QImage& thumbnail) {
+                    m_thumbnailWidget->onThumbnailLoaded(pageIndex, thumbnail);
+                });
 
         // 编辑器保存完成信号
         OutlineEditor* editor = m_session->outlineEditor();
@@ -314,6 +388,61 @@ void NavigationPanel::setupConnections()
                             qInfo() << "NavigationPanel: Outline saved successfully";
                         } else {
                             qWarning() << "NavigationPanel: Failed to save outline:" << errorMsg;
+                        }
+                    });
+        }
+
+        // ========== ThumbnailManager进度信号 ==========
+        if (m_session->contentHandler() && m_session->contentHandler()->thumbnailManager()) {
+            ThumbnailManagerV2* manager = m_session->contentHandler()->thumbnailManager();
+
+            // 加载开始
+            connect(manager, &ThumbnailManagerV2::loadingStarted,
+                    this, [this](int totalPages, const QString& strategy) {
+                        qInfo() << "Thumbnail loading started:" << strategy << "for" << totalPages << "pages";
+                        m_thumbnailStatusLabel->setText(tr("Initializing..."));
+                    });
+
+            // 状态变化
+            connect(manager, &ThumbnailManagerV2::loadingStatusChanged,
+                    this, [this](const QString& status) {
+                        m_thumbnailStatusLabel->setText(status);
+                    });
+
+            // 批次进度（中文档）
+            connect(manager, &ThumbnailManagerV2::batchCompleted,
+                    this, [this](int current, int total) {
+                        m_thumbnailProgressBar->setVisible(true);
+                        m_thumbnailProgressBar->setMaximum(total);
+                        m_thumbnailProgressBar->setValue(current);
+                        m_thumbnailProgressBar->setFormat(QString("%1/%2").arg(current).arg(total));
+                    });
+
+            // 全部完成
+            connect(manager, &ThumbnailManagerV2::allCompleted,
+                    this, [this]() {
+                        m_thumbnailStatusLabel->setText(tr("All thumbnails loaded"));
+                        m_thumbnailProgressBar->setVisible(false);
+
+                        // 3秒后恢复默认状态
+                        QTimer::singleShot(3000, this, [this]() {
+                            if (m_thumbnailStatusLabel) {
+                                m_thumbnailStatusLabel->setText(tr("Ready"));
+                            }
+                        });
+                    });
+
+            // 加载进度（用于同步加载阶段）
+            connect(manager, &ThumbnailManagerV2::loadProgress,
+                    this, [this](int current, int total) {
+                        if (total > 0) {
+                            int percentage = current * 100 / total;
+                            m_thumbnailStatusLabel->setText(
+                                tr("Loading: %1/%2 (%3%)")
+                                    .arg(current)
+                                    .arg(total)
+                                    .arg(percentage)
+                                );
                         }
                     });
         }

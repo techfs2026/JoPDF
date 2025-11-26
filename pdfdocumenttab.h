@@ -102,10 +102,6 @@ signals:
     // 搜索相关
     void searchCompleted(const QString& query, int totalMatches);
 
-    // 进度相关
-    void textPreloadProgress(int current, int total);
-    void textPreloadCompleted();
-
 private slots:
     void onDocumentLoaded(const QString& filePath, int pageCount);
     void onPageChanged(int pageIndex);

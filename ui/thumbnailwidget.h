@@ -12,6 +12,7 @@
 #include <QRect>
 
 class ThumbnailItem;
+class ThumbnailManagerV2;
 
 enum class ScrollState {
     IDLE,
@@ -33,6 +34,9 @@ public:
     void highlightCurrentPage(int pageIndex);
     void setThumbnailSize(int width);
 
+    // 新增：设置 Manager 引用，用于检查是否应响应滚动
+    void setThumbnailManager(ThumbnailManagerV2* manager);
+
     static constexpr int DEFAULT_THUMBNAIL_WIDTH = 120;
     static constexpr int THUMBNAIL_SPACING = 12;
     static constexpr double A4_RATIO = 1.414;
@@ -44,7 +48,7 @@ signals:
     void syncLoadRequested(const QSet<int>& unloadedVisible);
 
 public slots:
-    void onThumbnailLoaded(int pageIndex, const QImage& thumbnail, bool isHighRes);
+    void onThumbnailLoaded(int pageIndex, const QImage& thumbnail);  // 移除 isHighRes 参数
 
 protected:
     void scrollContentsBy(int dx, int dy) override;
@@ -79,6 +83,8 @@ private:
 
     QTimer* m_throttleTimer;
     QTimer* m_debounceTimer;
+
+    ThumbnailManagerV2* m_manager;  // 用于检查加载状态
 };
 
 class ThumbnailItem : public QWidget
@@ -89,7 +95,7 @@ public:
     explicit ThumbnailItem(int pageIndex, int width, QWidget* parent = nullptr);
 
     void setPlaceholder(const QString& text);
-    void setThumbnail(const QImage& image, bool isHighRes);
+    void setThumbnail(const QImage& image);  // 移除 isHighRes 参数
     void setError(const QString& error);
     void setHighlight(bool highlight);
 
@@ -112,7 +118,6 @@ private:
     int m_width;
     int m_height;
     bool m_hasImage;
-    bool m_isHighRes;
     bool m_isHighlighted;
     bool m_isHovered;
 

@@ -480,8 +480,6 @@ void PDFDocumentTab::onTextPreloadProgress(int current, int total)
         m_textPreloadProgress->setValue(current);
         m_textPreloadProgress->setFormat(QString("%1/%2").arg(current).arg(total));
     }
-
-    emit textPreloadProgress(current, total);
 }
 
 void PDFDocumentTab::onTextPreloadCompleted()
@@ -489,8 +487,6 @@ void PDFDocumentTab::onTextPreloadCompleted()
     if (m_textPreloadProgress) {
         m_textPreloadProgress->setVisible(false);
     }
-
-    emit textPreloadCompleted();
 }
 
 // ==================== 私有方法 ====================

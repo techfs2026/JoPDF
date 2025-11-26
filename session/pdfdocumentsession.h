@@ -410,7 +410,7 @@ signals:
     void outlineLoaded(bool success, int itemCount);
 
 
-    void thumbnailLoaded(int pageIndex, const QImage& thumbnail, bool isHighRes);
+    void thumbnailLoaded(int pageIndex, const QImage& thumbnail);
     void thumbnailLoadProgress(int current, int total);
 
     /**

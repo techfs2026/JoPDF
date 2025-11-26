@@ -62,14 +62,18 @@ public:
     QString getStatistics() const;
     int cachedCount() const;
 
+    bool shouldRespondToScroll() const;
+
 signals:
-    void thumbnailLoaded(int pageIndex, const QImage& thumbnail, bool isHighRes);
+    void thumbnailLoaded(int pageIndex, const QImage& thumbnail);
     void loadProgress(int loaded, int total);
     void batchCompleted(int batchIndex, int totalBatches);
     void allCompleted();
 
+    void loadingStarted(int totalPages, const QString& strategy);
+    void loadingStatusChanged(const QString& status);
+
 private slots:
-    void onBatchTaskFinished();
     void processNextBatch();
 
 private:
@@ -95,8 +99,9 @@ private:
     QMutex m_taskMutex;
     QVector<ThumbnailBatchTask*> m_activeTasks;
 
+    bool m_isLoadingInProgress;  // 标记是否正在批次加载中
+
     void trackTask(ThumbnailBatchTask* task);
-    void untrackTask(ThumbnailBatchTask* task);
 };
 
 #endif // THUMBNAILMANAGER_V2_H

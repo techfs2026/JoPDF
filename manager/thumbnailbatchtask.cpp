@@ -6,22 +6,18 @@
 #include <QDebug>
 
 ThumbnailBatchTask::ThumbnailBatchTask(const QString& docPath,
-                                       ThumbnailCache* cache,
-                                       ThumbnailManagerV2* manager,
-                                       const QVector<int>& pageIndices,
-                                       RenderPriority priority,
-                                       bool isLowRes,
-                                       int lowResWidth,
-                                       int highResWidth,
-                                       int rotation)
+                       ThumbnailCache* cache,
+                       ThumbnailManagerV2* manager,
+                       const QVector<int>& pageIndices,
+                       RenderPriority priority,
+                       int thumbnailWidth,
+                       int rotation)
     : m_renderer(std::make_unique<ThreadSafeRenderer>(docPath))
     , m_cache(cache)
     , m_manager(manager)
     , m_pageIndices(pageIndices)
     , m_priority(priority)
-    , m_isLowRes(isLowRes)
-    , m_lowResWidth(lowResWidth)
-    , m_highResWidth(highResWidth)
+    , m_thumbnailWidth(thumbnailWidth)
     , m_rotation(rotation)
     , m_aborted(0)
 {
@@ -46,13 +42,9 @@ void ThumbnailBatchTask::run()
     int batchLimit = getBatchLimit();
     int rendered = 0;
 
-    QString priorityStr = m_isLowRes ? "LOW-RES" : "HIGH-RES";
-
     for (int pageIndex : m_pageIndices) {
-        // 检查中断标志
         if (isAborted()) {
-            qDebug() << "ThumbnailBatchTask:" << priorityStr
-                     << "aborted after rendering" << rendered << "pages";
+            qDebug() << "ThumbnailBatchTask: Aborted after rendering" << rendered << "pages";
             break;
         }
 
@@ -61,25 +53,18 @@ void ThumbnailBatchTask::run()
             break;
         }
 
-        // 检查批大小限制
         if (rendered >= batchLimit) {
-            qDebug() << "ThumbnailBatchTask:" << priorityStr
-                     << "batch limit reached";
+            qDebug() << "ThumbnailBatchTask: Batch limit reached";
             break;
         }
 
-        // 检查时间预算
         if (timer.elapsed() > timeBudget) {
-            qDebug() << "ThumbnailBatchTask:" << priorityStr
-                     << "time budget exceeded:" << timer.elapsed() << "ms";
+            qDebug() << "ThumbnailBatchTask: Time budget exceeded:" << timer.elapsed() << "ms";
             break;
         }
 
         // 检查是否已缓存
-        if (m_isLowRes && m_cache->hasLowRes(pageIndex)) {
-            continue;
-        }
-        if (!m_isLowRes && m_cache->hasHighRes(pageIndex)) {
+        if (m_cache->has(pageIndex)) {
             continue;
         }
 
@@ -90,10 +75,9 @@ void ThumbnailBatchTask::run()
             continue;
         }
 
-        int targetWidth = m_isLowRes ? m_lowResWidth : m_highResWidth;
-        double zoom = targetWidth / pageSize.width();
+        double zoom = m_thumbnailWidth / pageSize.width();
 
-        // 渲染页面(线程安全)
+        // 渲染页面
         QImage thumbnail = m_renderer->renderPage(pageIndex, zoom, m_rotation);
 
         if (thumbnail.isNull()) {
@@ -102,18 +86,14 @@ void ThumbnailBatchTask::run()
         }
 
         // 保存到缓存
-        if (m_isLowRes) {
-            m_cache->setLowRes(pageIndex, thumbnail);
-        } else {
-            m_cache->setHighRes(pageIndex, thumbnail);
-        }
+        m_cache->set(pageIndex, thumbnail);
 
+        // 通知UI
         if (m_manager) {
             QMetaObject::invokeMethod(m_manager, "thumbnailLoaded",
                                       Qt::QueuedConnection,
                                       Q_ARG(int, pageIndex),
-                                      Q_ARG(QImage, thumbnail),
-                                      Q_ARG(bool, !m_isLowRes));
+                                      Q_ARG(QImage, thumbnail));
         }
 
         rendered++;
@@ -121,8 +101,8 @@ void ThumbnailBatchTask::run()
 
     qint64 elapsed = timer.elapsed();
     if (rendered > 0) {
-        qDebug() << "ThumbnailBatchTask:" << priorityStr
-                 << "rendered" << rendered << "pages in" << elapsed << "ms"
+        qDebug() << "ThumbnailBatchTask: Rendered" << rendered
+                 << "pages in" << elapsed << "ms"
                  << "(" << (elapsed / rendered) << "ms/page)";
     }
 }

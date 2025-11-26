@@ -81,7 +81,7 @@ signals:
 
     // 缩略图事件
     void thumbnailsInitialized(int pageCount);
-    void thumbnailLoaded(int pageIndex, const QImage& thumbnail, bool isHighRes);
+    void thumbnailLoaded(int pageIndex, const QImage& thumbnail);
     void thumbnailLoadProgress(int current, int total);
 
 private:
