@@ -10,14 +10,13 @@
 - **多标签页**：同时打开多个 PDF 文档
 
 ### 🔍 交互功能
-- **全文搜索**：支持大小写敏感、全字匹配
+- **全文搜索**：支持大小写敏感、全字匹配(目前是当前页，测试功能OK后做全文搜索)
 - **文本选择**：字符级、单词、整行选择
 - **链接支持**：内部跳转和外部链接
 - **导航面板**：目录大纲、缩略图预览
 
 ### 📝 高级功能
 - **大纲编辑**：添加、删除、重命名书签
-- **智能缓存**：基于 LRU 的页面缓存策略
 - **文本预加载**：后台异步提取文本
 - **PDF 类型识别**：自动识别文本 PDF 和扫描 PDF
 
@@ -55,14 +54,6 @@ JoPDF
     ├── NavigationPanel - 导航面板
     └── SearchWidget - 搜索工具栏
 ```
-
-### 设计模式
-
-- **依赖注入**：Handler 层通过构造函数注入依赖
-- **职责分离**：每个 Handler 负责特定功能域
-- **观察者模式**：使用 Qt 信号槽机制
-- **策略模式**：缓存策略、缩放模式
-- **单例模式**：应用配置管理
 
 
 ## 📚 使用说明
@@ -116,52 +107,56 @@ JoPDF
 
 ## 🔧 核心组件说明
 
-### PDFDocumentSession
+项目采用分层架构，从高到低是UI层、Session层、Handler/Cache/Renderer层、Model/Manager/Tool层，此外还有Util工具包。
 
-文档会话管理器，协调所有子系统：
+目前的技术方案是上层依赖下层，不跨层调用(目标，代码正往这个方向调整)。
 
-```cpp
-PDFDocumentSession session;
-session.loadDocument("path/to/file.pdf");
-session.setCurrentPage(5);
-session.setZoomMode(ZoomMode::FitWidth);
-```
+### UI层
 
-### PDFViewHandler
+主窗口是MainWindow，包含菜单栏、工具栏、Tab页。Tab页为PDFDocumentTab,PDFDocumentTab包含导航栏和页面。导航栏为NavigationPanel，包括
+大纲和缩略图，大纲为OutlineWidget，缩略图为ThumbnailWidget。页面为PDFPageWidget。
 
-管理视图状态（页面、缩放、显示模式）：
+此外，还有一些小组件：SearchWidget、OutlineDialog。
 
-- 页面导航逻辑
-- 缩放计算
-- 连续滚动位置管理
-- 双页模式处理
+UI层负责界面布局，响应各种事件，接受Session层的信号更新UI。
 
-### PDFContentHandler
+### Session层
 
-管理文档内容（大纲、缩略图）：
+Session层是这个应用最重要的一层。UI层的交互全部委托给Session层，由Session层根据职责分发给不同的Handler，同时UI层接受Session层的信号更新UI。
 
-- 大纲加载与编辑
-- 缩略图生成
-- PDF 类型检测
+Session即PDFDocumentSession，主要管理Handler、State、Renderer、Cache，这4者的生命周期由Session负责。
 
-### PDFInteractionHandler
+每个Tab页都有一个Session，多个Tab页不共享数据，即Session是隔离的。PDF的核心状态数据维护在Session的State里，State为PDFDocumentState。
 
-处理用户交互（搜索、选择、链接）：
+### Handler层
 
-- 全文搜索
-- 文本选择（字符/单词/行）
-- 链接检测与跳转
+Session本质上不干业务重活，负责分发业务给具体的Handler。Handler在应用中真正负责干活。目前划分为3个Handler：PDFViewHandler、
+PDFContentHandler、PDFInteractionHandler。
 
-### 缓存系统
+PDFContentHandler负责打开PDF、关闭PDF，同时负责大纲和缩略图数据的加载。
 
-**PageCacheManager**: LRU 页面缓存
-- 自动管理内存使用
-- 预加载可见页面周围内容
-- 支持多种缓存策略
+PDFViewHandler负责管理视图状态：页码跳转、缩放、显示模式。
 
-**TextCacheManager**: 文本提取缓存
-- 后台异步预加载
-- 提高搜索性能
+PDFInteractionHandler负责用户交互，比如选择文本、搜索、链接跳转。
+
+### Cache层
+
+Session管理PDF的一些缓存数据。包括文本缓存、页面缓存，文本缓存为TextCacheManager，为搜索、选择文本以及未来的批注功能提供数据支援；页面缓存
+为PageCacheManager，渲染好的页面存放到缓存中，提升阅读体验，减少加载页面耗时。
+
+### Renderer层
+
+PDF的底层是有MuPDF提供渲染能力的，Renderer层封装了MuPDF的API，方便其他模块使用。由于MuPDF的context/document不能在多线程中混用，而是每个
+线程(主线程/线程池里的线程)使用自己的Renderer，关于这点，还在想办法提升性能。
+
+### Manager层
+
+Handler层只负责处理业务，它不持有状态和数据，状态来自Session的State，数据来自Manager，比如大纲数据由OutlineManager提供，缩略图
+由ThumbnailManagerV2提供。还有一些交互功能也由响应的Manager来提供，比如搜索来自SearchManager。
+
+### Model层/Tool层
+
+辅助层，为其他模块提供数据建模，并非MVC或MVVM的Model。同样的，Tool层类似。
 
 ## 📊 性能优化
 

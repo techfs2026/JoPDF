@@ -82,6 +82,8 @@ set(UI_SOURCES
     ui/outlinedialog.h
     ui/searchwidget.cpp
     ui/searchwidget.h
+    ui/navigationpanel.cpp
+    ui/navigationpanel.h
 )
 
 set(SESSION_SOURCES
@@ -105,8 +107,6 @@ set(SOURCES
     mainwindow.h
     pdfpagewidget.cpp
     pdfpagewidget.h
-    navigationpanel.cpp
-    navigationpanel.h
     pdfdocumenttab.cpp
     pdfdocumenttab.h
 
