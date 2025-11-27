@@ -538,9 +538,18 @@ void PDFDocumentTab::onPagePositionsChanged(const QVector<int>& positions, const
     m_pageWidget->resize(targetSize);
 
     refreshVisiblePages();
-    // QTimer::singleShot(0, this, [this]() {
-    //     refreshVisiblePages();
-    // });
+
+    if (m_session->state()->isContinuousScroll()) {
+        int currentPage = m_session->state()->currentPage();
+        int targetY = m_session->getScrollPositionForPage(currentPage, AppConfig::PAGE_MARGIN);
+
+        if (targetY >= 0) {
+            // 使用 QTimer 延迟执行，确保 widget resize 完成后再滚动
+            QTimer::singleShot(0, this, [this, targetY]() {
+                m_scrollArea->verticalScrollBar()->setValue(targetY);
+            });
+        }
+    }
 }
 
 void PDFDocumentTab::onTextSelectionChanged(bool hasSelection)
