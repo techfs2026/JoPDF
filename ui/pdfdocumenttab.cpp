@@ -521,6 +521,13 @@ void PDFDocumentTab::onDisplayModeChanged(PageDisplayMode mode)
 {
     updateScrollBarPolicy();
     m_session->textCache()->clear();
+
+    // 如果是自适应模式，需要重新计算缩放
+    if (m_session->state()->currentZoomMode() != ZoomMode::Custom) {
+        QSize viewportSize = m_scrollArea->viewport()->size();
+        m_session->updateZoom(viewportSize);
+    }
+
     renderAndUpdatePages();
     emit displayModeChanged(mode);
 }
@@ -528,6 +535,13 @@ void PDFDocumentTab::onDisplayModeChanged(PageDisplayMode mode)
 void PDFDocumentTab::onContinuousScrollChanged(bool continuous)
 {
     updateScrollBarPolicy();
+
+    // 如果是自适应模式，需要重新计算缩放
+    if (m_session->state()->currentZoomMode() != ZoomMode::Custom) {
+        QSize viewportSize = m_scrollArea->viewport()->size();
+        m_session->updateZoom(viewportSize);
+    }
+
     renderAndUpdatePages();
     emit continuousScrollChanged(continuous);
 }
