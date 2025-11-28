@@ -146,6 +146,8 @@ private:
     QAction* m_singlePageToolbarAction;
     QAction* m_doublePageToolbarAction;
     QAction* m_continuousScrollToolbarAction;
+    QAction* m_fitPageToolbarAction;
+    QAction* m_fitWidthToolbarAction;
 
     // 防抖定时器
     QTimer m_resizeDebounceTimer;

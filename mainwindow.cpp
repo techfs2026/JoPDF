@@ -472,12 +472,7 @@ void MainWindow::onCurrentTabZoomChanged(double zoom)
     updateZoomCombox(zoom);
 
     // 同步缩放模式按钮状态
-    PDFDocumentTab* tab = currentTab();
-    if (tab) {
-        ZoomMode mode = tab->zoomMode();
-        m_fitPageAction->setChecked(mode == ZoomMode::FitPage);
-        m_fitWidthAction->setChecked(mode == ZoomMode::FitWidth);
-    }
+    updateUIState();
 }
 
 void MainWindow::updateZoomCombox(double zoom)
@@ -503,20 +498,7 @@ void MainWindow::onCurrentTabDisplayModeChanged(PageDisplayMode mode)
         return;
     }
 
-    // 同步页面模式按钮
-    m_singlePageAction->setChecked(mode == PageDisplayMode::SinglePage);
-    m_doublePageAction->setChecked(mode == PageDisplayMode::DoublePage);
-
-    m_singlePageToolbarAction->setChecked(mode == PageDisplayMode::SinglePage);
-    m_doublePageToolbarAction->setChecked(mode == PageDisplayMode::DoublePage);
-
-    // 双页模式下禁用连续滚动
-    bool continuous = sender->isContinuousScroll();
-    m_continuousScrollAction->setEnabled(continuous);
-    m_continuousScrollAction->setChecked(continuous);
-
-    m_continuousScrollToolbarAction->setEnabled(continuous);
-    m_continuousScrollToolbarAction->setChecked(continuous);
+    updateUIState();
 }
 
 void MainWindow::onCurrentTabContinuousScrollChanged(bool continuous)
@@ -526,10 +508,7 @@ void MainWindow::onCurrentTabContinuousScrollChanged(bool continuous)
         return;
     }
 
-    // 同步连续滚动按钮
-    m_continuousScrollAction->setChecked(continuous);
-
-    m_continuousScrollToolbarAction->setChecked(continuous);
+    updateUIState();
 }
 
 void MainWindow::onCurrentTabTextSelectionChanged()
@@ -652,9 +631,11 @@ void MainWindow::createMenuBar()
 
     m_fitPageAction = viewMenu->addAction(tr("Fit &Page"), this, &MainWindow::fitPage);
     m_fitPageAction->setShortcut(tr("Ctrl+1"));
+    m_fitPageAction->setCheckable(true);
 
     m_fitWidthAction = viewMenu->addAction(tr("Fit &Width"), this, &MainWindow::fitWidth);
     m_fitWidthAction->setShortcut(tr("Ctrl+2"));
+    m_fitWidthAction->setCheckable(true);
 
     viewMenu->addSeparator();
 
@@ -791,15 +772,15 @@ void MainWindow::createToolBar()
     m_toolBar->addSeparator();
 
     // ========== 缩放模式（可检查） ==========
-    m_fitPageAction = m_toolBar->addAction(QIcon(":/icons/icons/fit-to-page.png"), tr("Fit Page"));
-    m_fitPageAction->setToolTip(tr("Fit Page (Ctrl+1)"));
-    m_fitPageAction->setCheckable(true);
-    connect(m_fitPageAction, &QAction::triggered, this, &MainWindow::fitPage);
+    m_fitPageToolbarAction = m_toolBar->addAction(QIcon(":/icons/icons/fit-to-page.png"), tr("Fit Page"));
+    m_fitPageToolbarAction->setToolTip(tr("Fit Page (Ctrl+1)"));
+    m_fitPageToolbarAction->setCheckable(true);
+    connect(m_fitPageToolbarAction, &QAction::triggered, this, &MainWindow::fitPage);
 
-    m_fitWidthAction = m_toolBar->addAction(QIcon(":/icons/icons/fit-to-width.png"), tr("Fit Width"));
-    m_fitWidthAction->setToolTip(tr("Fit Width (Ctrl+2)"));
-    m_fitWidthAction->setCheckable(true);
-    connect(m_fitWidthAction, &QAction::triggered, this, &MainWindow::fitWidth);
+    m_fitWidthToolbarAction = m_toolBar->addAction(QIcon(":/icons/icons/fit-to-width.png"), tr("Fit Width"));
+    m_fitWidthToolbarAction->setToolTip(tr("Fit Width (Ctrl+2)"));
+    m_fitWidthToolbarAction->setCheckable(true);
+    connect(m_fitWidthToolbarAction, &QAction::triggered, this, &MainWindow::fitWidth);
 
     m_toolBar->addSeparator();
 
@@ -933,7 +914,9 @@ void MainWindow::updateUIState()
     m_fitWidthAction->setEnabled(hasDocument);
 
     // 同步缩放模式按钮状态
+    m_fitPageAction->setEnabled(hasDocument && zoomMode != ZoomMode::FitPage);
     m_fitPageAction->setChecked(hasDocument && zoomMode == ZoomMode::FitPage);
+    m_fitWidthAction->setEnabled(hasDocument && zoomMode != ZoomMode::FitWidth);
     m_fitWidthAction->setChecked(hasDocument && zoomMode == ZoomMode::FitWidth);
 
     // 视图操作 - 菜单
@@ -966,6 +949,11 @@ void MainWindow::updateUIState()
     // 工具栏组件
     m_navPanelAction->setEnabled(hasDocument);
     m_navPanelAction->setChecked(m_navigationDock->isVisible());
+
+    m_fitPageToolbarAction->setEnabled(hasDocument && zoomMode != ZoomMode::FitPage);
+    m_fitPageToolbarAction->setChecked(hasDocument && zoomMode == ZoomMode::FitPage);
+    m_fitWidthToolbarAction->setEnabled(hasDocument && zoomMode != ZoomMode::FitWidth);
+    m_fitWidthToolbarAction->setChecked(hasDocument && zoomMode == ZoomMode::FitWidth);
 
     if (m_pageSpinBox) {
         m_pageSpinBox->setEnabled(hasDocument);

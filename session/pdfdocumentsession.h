@@ -320,6 +320,9 @@ public:
     QString getCacheStatistics() const;
     QString getTextCacheStatistics() const;
 
+    void saveViewportState(int scrollY);
+    void clearViewportRestore();
+
 signals:
     // ==================== 文档状态变化信号 ====================
 
@@ -351,6 +354,8 @@ signals:
      * @brief 当前缩放比例变化
      */
     void currentZoomChanged(double zoom);
+
+    void requestCurrentScrollPosition();
 
     /**
      * @brief 缩放模式变化

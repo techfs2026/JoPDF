@@ -538,6 +538,14 @@ QString PDFDocumentSession::getTextCacheStatistics() const
     return m_textCache ? m_textCache->getStatistics() : QString();
 }
 
+void PDFDocumentSession::saveViewportState(int scrollY) {
+    m_state->saveViewportState(scrollY);
+}
+
+void PDFDocumentSession::clearViewportRestore() {
+    m_state->clearViewportRestore();
+}
+
 // ==================== 私有方法 ====================
 
 void PDFDocumentSession::setupConnections()
@@ -568,6 +576,13 @@ void PDFDocumentSession::setupConnections()
                         // 触发重新计算（由UI调用updateZoom）
                         emit zoomSettingCompleted(newZoom, newMode);
                         return;
+                    }
+
+                    if (m_state->isContinuousScroll() &&
+                        qAbs(m_state->currentZoom() - newZoom) > 0.001) {
+
+                        // 需要从UI获取当前scrollY
+                        emit requestCurrentScrollPosition();  // 新信号
                     }
 
                     m_state->setCurrentZoom(newZoom);

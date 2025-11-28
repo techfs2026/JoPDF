@@ -111,6 +111,63 @@ void PDFDocumentState::setSearchState(bool searching, int totalMatches, int curr
     }
 }
 
+void PDFDocumentState::saveViewportState(int scrollY)
+{
+    if (!m_isContinuousScroll || m_pageYPositions.isEmpty()) {
+        m_viewportRestore.needRestore = false;
+        return;
+    }
+
+    if (m_currentPage < 0 || m_currentPage >= m_pageYPositions.size()) {
+        m_viewportRestore.needRestore = false;
+        return;
+    }
+
+    // 使用当前（旧的）positions计算相对位置
+    int pageTop = m_pageYPositions[m_currentPage];  // 这里不加margin，因为scrollY也不含margin
+    int pageHeight = m_pageHeights[m_currentPage];
+
+    if (pageHeight > 0) {
+        double offsetRatio = (scrollY - pageTop) / (double)pageHeight;
+
+        m_viewportRestore.pageIndex = m_currentPage;
+        m_viewportRestore.pageOffsetRatio = qBound(0.0, offsetRatio, 1.0);
+        m_viewportRestore.needRestore = true;
+
+        qDebug() << "State: Saved viewport - page" << m_currentPage
+                 << "offset" << offsetRatio
+                 << "scrollY" << scrollY
+                 << "pageTop" << pageTop
+                 << "pageHeight" << pageHeight;
+    }
+}
+
+int PDFDocumentState::getRestoredScrollPosition(int margin) const
+{
+    if (!m_viewportRestore.needRestore) {
+        return -1;
+    }
+
+    if (m_viewportRestore.pageIndex < 0 ||
+        m_viewportRestore.pageIndex >= m_pageYPositions.size()) {
+        return -1;
+    }
+
+    // 使用新的positions计算绝对位置
+    int pageTop = m_pageYPositions[m_viewportRestore.pageIndex] + margin;
+    int pageHeight = m_pageHeights[m_viewportRestore.pageIndex];
+
+    int targetY = pageTop + (int)(pageHeight * m_viewportRestore.pageOffsetRatio);
+
+    qDebug() << "State: Restore viewport - page" << m_viewportRestore.pageIndex
+             << "offset" << m_viewportRestore.pageOffsetRatio
+             << "targetY" << targetY
+             << "pageTop" << pageTop
+             << "pageHeight" << pageHeight;
+
+    return targetY;
+}
+
 void PDFDocumentState::reset()
 {
     setDocumentLoaded(false, QString(), 0, false);

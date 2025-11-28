@@ -6,6 +6,21 @@
 #include <QVector>
 #include "datastructure.h"
 
+struct ViewportRestoreState {
+    int pageIndex;
+    double pageOffsetRatio;  // 页面内的垂直偏移百分比 [0.0, 1.0]
+    bool needRestore;
+
+    ViewportRestoreState()
+        : pageIndex(-1), pageOffsetRatio(0.0), needRestore(false) {}
+
+    void reset() {
+        pageIndex = -1;
+        pageOffsetRatio = 0.0;
+        needRestore = false;
+    }
+};
+
 /**
  * @brief PDF文档状态对象 - 集中管理文档的所有状态
  *
@@ -142,6 +157,18 @@ public:
      */
     void reset();
 
+    // 保存当前视口状态（相对位置）
+    void saveViewportState(int scrollY);
+
+    // 获取需要恢复的滚动位置（基于新的positions计算）
+    int getRestoredScrollPosition(int margin) const;
+
+    // 是否需要恢复视口
+    bool needRestoreViewport() const { return m_viewportRestore.needRestore; }
+
+    // 清除恢复状态
+    void clearViewportRestore() { m_viewportRestore.reset(); }
+
 
 private:
     // 文档基本信息
@@ -172,6 +199,8 @@ private:
     bool m_isSearching;
     int m_searchTotalMatches;
     int m_searchCurrentMatchIndex;
+
+    ViewportRestoreState m_viewportRestore;
 };
 
 #endif // PDFDOCUMENTSTATE_H

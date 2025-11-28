@@ -142,6 +142,12 @@ void PDFDocumentTab::setupConnections()
                 m_scrollArea->verticalScrollBar()->setValue(scrollY);
             });
 
+    connect(m_session, &PDFDocumentSession::requestCurrentScrollPosition,
+            this, [this]() {
+                int scrollY = m_scrollArea->verticalScrollBar()->value();
+                m_session->saveViewportState(scrollY);
+            });
+
     connect(m_session, &PDFDocumentSession::textSelectionChanged,
             this, &PDFDocumentTab::onTextSelectionChanged);
 
@@ -556,11 +562,19 @@ void PDFDocumentTab::onPagePositionsChanged(const QVector<int>& positions, const
 
     if (m_session->state()->isContinuousScroll()) {
         if (!m_isUserScrolling) {
-            int currentPage = m_session->state()->currentPage();
-            int targetY = m_session->getScrollPositionForPage(currentPage, AppConfig::PAGE_MARGIN);
+            int targetY = -1;
+
+            // 优先使用State中保存的恢复位置
+            if (m_session->state()->needRestoreViewport()) {
+                targetY = m_session->state()->getRestoredScrollPosition(AppConfig::PAGE_MARGIN);
+                m_session->clearViewportRestore();
+            } else {
+                // 默认行为：当前页顶部
+                int currentPage = m_session->state()->currentPage();
+                targetY = m_session->getScrollPositionForPage(currentPage, AppConfig::PAGE_MARGIN);
+            }
 
             if (targetY >= 0) {
-                // 使用 QTimer 延迟执行，确保 widget resize 完成后再滚动
                 QTimer::singleShot(0, this, [this, targetY]() {
                     m_scrollArea->verticalScrollBar()->setValue(targetY);
                 });
