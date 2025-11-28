@@ -37,6 +37,8 @@ public:
     // 新增：设置 Manager 引用，用于检查是否应响应滚动
     void setThumbnailManager(ThumbnailManagerV2* manager);
 
+    QSet<int> getUnloadedVisiblePages() const;
+
     static constexpr int DEFAULT_THUMBNAIL_WIDTH = 120;
     static constexpr int THUMBNAIL_SPACING = 12;
     static constexpr double A4_RATIO = 1.414;
@@ -66,7 +68,6 @@ private:
     ScrollState detectScrollState();
     int getPreloadMargin(ScrollState state) const;
     void notifyVisibleRange();
-    QSet<int> getUnloadedVisiblePages() const;
 
 private:
     QWidget* m_container;

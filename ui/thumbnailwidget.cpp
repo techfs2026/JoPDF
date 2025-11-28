@@ -82,11 +82,9 @@ void ThumbnailWidget::initializeThumbnails(int pageCount)
              << ", itemWidth =" << itemWidth
              << ", columns =" << m_columnsPerRow;
 
-    m_itemRects.resize(pageCount);
-
     for (int i = 0; i < pageCount; ++i) {
         auto* item = new ThumbnailItem(i, m_thumbnailWidth, m_container);
-        item->setPlaceholder(tr("Page %1").arg(i + 1));
+        item->setPlaceholder(tr("第%1页").arg(i + 1));
 
         connect(item, &ThumbnailItem::clicked,
                 this, &ThumbnailWidget::onThumbnailClicked);
@@ -96,7 +94,6 @@ void ThumbnailWidget::initializeThumbnails(int pageCount)
         m_layout->addWidget(item, row, col);
 
         m_thumbnailItems[i] = item;
-        m_itemRects[i] = calculateItemRect(row, col);
     }
 
     qInfo() << "ThumbnailWidget: Created" << pageCount << "placeholder items";
@@ -130,7 +127,6 @@ void ThumbnailWidget::clear()
     }
 
     m_thumbnailItems.clear();
-    m_itemRects.clear();
     m_scrollHistory.clear();
     m_currentPage = -1;
 
@@ -171,6 +167,8 @@ void ThumbnailWidget::onThumbnailLoaded(int pageIndex, const QImage& thumbnail)
     if (!m_thumbnailItems.contains(pageIndex)) {
         return;
     }
+
+    qDebug() << "ThumbnailWidget onThumbnailLoaded:" << pageIndex;
 
     ThumbnailItem* item = m_thumbnailItems[pageIndex];
     item->setThumbnail(thumbnail);
@@ -213,7 +211,6 @@ void ThumbnailWidget::resizeEvent(QResizeEvent* event)
             }
         }
 
-        calculateItemPositions();
         m_throttleTimer->start();
     }
 }
@@ -233,7 +230,7 @@ void ThumbnailWidget::onScrollDebounce()
 
     qDebug() << "ThumbnailWidget: Scroll stopped";
 
-    // 检查是否应该响应滚动（避免批次加载期间触发）
+    // 检查是否应该响应滚动(避免批次加载期间触发)
     if (m_manager && !m_manager->shouldRespondToScroll()) {
         qDebug() << "ThumbnailWidget: Ignoring scroll stop during batch loading";
         return;
@@ -242,14 +239,15 @@ void ThumbnailWidget::onScrollDebounce()
     // 检查可见区域是否有未加载的占位页
     QSet<int> unloadedVisible = getUnloadedVisiblePages();
 
+    qDebug() << "ThumbnailWidget: unloadedVisible count =" << unloadedVisible.size();
     if (!unloadedVisible.isEmpty()) {
-        qInfo() << "ThumbnailWidget: Found" << unloadedVisible.size()
+        qInfo() << "ThumbnailWidget onScrollDebounce: Found" << unloadedVisible.size()
         << "unloaded visible pages after scroll stop, triggering sync load";
 
         emit syncLoadRequested(unloadedVisible);
     }
 
-    // 继续正常的可见区域通知（用于预加载周边页面）
+    // 继续正常的可见区域通知(用于预加载周边页面)
     if (m_manager && m_manager->shouldRespondToScroll()) {
         notifyVisibleRange();
     }
@@ -260,55 +258,106 @@ void ThumbnailWidget::onThumbnailClicked(int pageIndex)
     emit pageJumpRequested(pageIndex);
 }
 
-void ThumbnailWidget::calculateItemPositions()
-{
-    int itemWidth = m_thumbnailWidth + 20;
-    int itemHeight = static_cast<int>((m_thumbnailWidth + 20) * A4_RATIO);
-
-    for (int i = 0; i < m_itemRects.size(); ++i) {
-        int row = i / m_columnsPerRow;
-        int col = i % m_columnsPerRow;
-
-        int x = THUMBNAIL_SPACING + col * (itemWidth + THUMBNAIL_SPACING);
-        int y = THUMBNAIL_SPACING + row * (itemHeight + THUMBNAIL_SPACING);
-
-        m_itemRects[i] = QRect(x, y, itemWidth, itemHeight);
-    }
-}
-
-QRect ThumbnailWidget::calculateItemRect(int row, int col) const
-{
-    int itemWidth = m_thumbnailWidth + 20;
-    int itemHeight = static_cast<int>((m_thumbnailWidth + 20) * A4_RATIO);
-
-    int x = THUMBNAIL_SPACING + col * (itemWidth + THUMBNAIL_SPACING);
-    int y = THUMBNAIL_SPACING + row * (itemHeight + THUMBNAIL_SPACING);
-
-    return QRect(x, y, itemWidth, itemHeight);
-}
+// ========== 修复后的可见性判断方法 ==========
 
 QSet<int> ThumbnailWidget::getVisibleIndices(int margin) const
 {
+    if (!isVisible()) {
+        qDebug() << "ThumbnailWidget hidden, skipping getVisibleIndices";
+        return {};
+    }
+
     QSet<int> visible;
 
-    if (m_itemRects.isEmpty()) {
+    if (m_thumbnailItems.isEmpty()) {
+        qDebug() << "getVisibleIndices: m_thumbnailItems is empty";
         return visible;
     }
 
-    QRect viewportRect = viewport()->rect();
+    // 获取viewport的可见区域(滚动坐标系)
     int scrollY = verticalScrollBar()->value();
+    QRect viewportRect = viewport()->rect();
 
+    qDebug() << "getVisibleIndices: scrollY =" << scrollY
+             << ", viewportRect =" << viewportRect
+             << ", margin =" << margin;
+
+    viewportRect.translate(0, scrollY); // 转换到container坐标系
+
+    // 扩展margin
     QRect extendedViewport = viewportRect.adjusted(0, -margin, 0, margin);
-    extendedViewport.translate(0, scrollY);
 
-    for (int i = 0; i < m_itemRects.size(); ++i) {
-        if (m_itemRects[i].intersects(extendedViewport)) {
-            visible.insert(i);
+    qDebug() << "getVisibleIndices: extendedViewport =" << extendedViewport;
+
+    // 遍历所有widget，使用实际位置判断可见性
+    int checkCount = 0;
+    for (auto it = m_thumbnailItems.constBegin(); it != m_thumbnailItems.constEnd(); ++it) {
+        int pageIndex = it.key();
+        ThumbnailItem* widget = it.value();
+
+        if (!widget || !widget->isVisible()) {
+            continue;
         }
+
+        // 获取widget在container中的实际位置
+        QRect widgetRect = widget->geometry();
+
+        checkCount++;
+        if (checkCount <= 5) { // 只打印前5个
+            qDebug() << "  Page" << pageIndex << "geometry =" << widgetRect;
+        }
+
+        // 判断是否与扩展的viewport相交
+        if (widgetRect.intersects(extendedViewport)) {
+            visible.insert(pageIndex);
+        }
+    }
+
+    qDebug() << "getVisibleIndices: checked" << checkCount << "widgets, found" << visible.size() << "visible";
+    if (!visible.isEmpty() && visible.size() <= 20) {
+        qDebug() << "  Visible pages:" << visible;
     }
 
     return visible;
 }
+
+QSet<int> ThumbnailWidget::getUnloadedVisiblePages() const
+{
+    QSet<int> unloaded;
+
+    if (m_thumbnailItems.isEmpty()) {
+        qDebug() << "getUnloadedVisiblePages: m_thumbnailItems is empty";
+        return unloaded;
+    }
+
+    // 获取严格可见区域(不带margin)
+    QSet<int> visible = getVisibleIndices(0);
+
+    qDebug() << "getUnloadedVisiblePages: visible count =" << visible.size();
+
+    // 检查哪些页面还是占位符
+    for (int pageIndex : visible) {
+        if (m_thumbnailItems.contains(pageIndex)) {
+            ThumbnailItem* item = m_thumbnailItems[pageIndex];
+            bool hasImage = item->hasImage();
+
+            qDebug() << "  Page" << pageIndex << "hasImage =" << hasImage;
+
+            if (!hasImage) {
+                unloaded.insert(pageIndex);
+            }
+        }
+    }
+
+    qDebug() << "getUnloadedVisiblePages: unloaded count =" << unloaded.size();
+    if (!unloaded.isEmpty()) {
+        qDebug() << "  Unloaded pages:" << unloaded;
+    }
+
+    return unloaded;
+}
+
+// ========== 其他方法保持不变 ==========
 
 ScrollState ThumbnailWidget::detectScrollState()
 {
@@ -370,30 +419,6 @@ void ThumbnailWidget::notifyVisibleRange()
     emit visibleRangeChanged(visible, margin);
 }
 
-QSet<int> ThumbnailWidget::getUnloadedVisiblePages() const
-{
-    QSet<int> unloaded;
-
-    if (m_itemRects.isEmpty()) {
-        return unloaded;
-    }
-
-    // 获取严格可见区域（不带 margin）
-    QSet<int> visible = getVisibleIndices(0);
-
-    // 检查哪些页面还是占位符
-    for (int pageIndex : visible) {
-        if (m_thumbnailItems.contains(pageIndex)) {
-            ThumbnailItem* item = m_thumbnailItems[pageIndex];
-            if (!item->hasImage()) {
-                unloaded.insert(pageIndex);
-            }
-        }
-    }
-
-    return unloaded;
-}
-
 // ================================================================
 //                       ThumbnailItem
 // ================================================================
@@ -431,7 +456,7 @@ ThumbnailItem::ThumbnailItem(int pageIndex, int width, QWidget* parent)
     shadow->setOffset(0, 2);
     m_imageContainer->setGraphicsEffect(shadow);
 
-    m_pageLabel = new QLabel(tr("Page %1").arg(pageIndex + 1), this);
+    m_pageLabel = new QLabel(tr("第%1页").arg(pageIndex + 1), this);
     m_pageLabel->setAlignment(Qt::AlignCenter);
     QFont font = m_pageLabel->font();
     font.setPointSize(9);

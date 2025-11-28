@@ -89,6 +89,20 @@ void NavigationPanel::clear()
 
 void NavigationPanel::onTabChanged(int index) {
     updateCurrentPage(m_session->state()->currentPage());
+
+    if (index == 1 && m_thumbnailWidget) {  // 1 = 缩略图标签页
+        QTimer::singleShot(50, this, [this]() {
+            if (m_thumbnailWidget) {
+                QSet<int> unloadedVisible = m_thumbnailWidget->getUnloadedVisiblePages();
+                if (!unloadedVisible.isEmpty()) {
+                    qInfo() << "NavigationPanel: Tab switched, found" << unloadedVisible.size() << "unloaded visible pages";
+                    if (m_session && m_session->contentHandler()) {
+                        m_session->contentHandler()->syncLoadUnloadedPages(unloadedVisible);
+                    }
+                }
+            }
+        });
+    }
 }
 
 void NavigationPanel::updateCurrentPage(int pageIndex)
