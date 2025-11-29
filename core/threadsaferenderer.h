@@ -5,6 +5,7 @@
 #include <QImage>
 #include <QSizeF>
 #include <QMutex>
+#include "datastructure.h"
 
 extern "C" {
 #include <mupdf/fitz.h>
@@ -59,6 +60,13 @@ public:
      * @return 页面尺寸 (points)，失败返回空尺寸
      */
     QSizeF getPageSize(int pageIndex);
+
+    /**
+     * @brief 提取指定页面的结构化文本
+     * @param pageIndex 页面索引 (0-based)
+     * @return 页面文本数据，失败返回空数据
+     */
+    PageTextData extractPageText(int pageIndex);
 
     /**
      * @brief 获取最后的错误信息

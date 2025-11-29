@@ -17,7 +17,8 @@ ThumbnailManagerV2::ThumbnailManagerV2(MuPDFRenderer* renderer, QObject* parent)
     , m_isLoadingInProgress(false)
     , m_devicePixelRatio(1.0)
 {
-    int threadCount = qMin(4, QThreadPool::globalInstance()->maxThreadCount() / 2);
+    qDebug() << "idle thread count:" << QThread::idealThreadCount();
+    int threadCount = qMin(4, QThread::idealThreadCount() / 2);
     m_threadPool->setMaxThreadCount(threadCount);
     m_threadPool->setExpiryTimeout(30000);
 

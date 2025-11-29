@@ -3,23 +3,22 @@
 
 #include <QObject>
 #include <QHash>
-#include <QVector>
 #include <QMutex>
 #include <QString>
-#include <QRectF>
-#include <QChar>
 #include <QAtomicInt>
 #include <QThreadPool>
 
-#include "mupdfrenderer.h"
 #include "datastructure.h"
 
-extern "C" {
-#include <mupdf/fitz.h>
-}
-
+class MuPDFRenderer;
 class PageExtractTask;
 
+/**
+ * @brief 文本缓存管理器
+ *
+ * 负责管理页面文本数据的缓存和异步预加载
+ * 不直接接触 MuPDF API，所有渲染工作委托给 ThreadSafeRenderer
+ */
 class TextCacheManager : public QObject
 {
     Q_OBJECT
@@ -54,7 +53,7 @@ signals:
     void preloadError(const QString& error);
 
 private slots:
-    // 由 PageExtractTask 通过 QMetaObject::invokeMethod 调用（QueuedConnection）
+    // 由 PageExtractTask 通过 QMetaObject::invokeMethod 调用
     void handleTaskDone(int pageIndex, PageTextData pageData, bool ok);
 
 private:
@@ -73,16 +72,10 @@ private:
     QAtomicInt m_isPreloading;
     QAtomicInt m_cancelRequested;
     QAtomicInt m_preloadedPages;
-
-    // 剩余待处理任务数（原子，用于判断何时完成）
     QAtomicInt m_remainingTasks;
 
-    // 线程池（使用全局或独立池均可，cpp 中使用 QThreadPool::globalInstance()）
-    // 此处保留一个成员以便未来改成独立池（可选）
+    // 线程池
     QThreadPool m_threadPool;
-
-    // 文档路径副本（线程安全的只读拷贝）
-    QString m_documentPath;
 
     // 统计信息
     qint64 m_hitCount;
