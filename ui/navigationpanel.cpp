@@ -360,6 +360,17 @@ void NavigationPanel::setupConnections()
                 }
             });
 
+    // 连接慢速滚动信号（仅大文档生效）
+    connect(m_thumbnailWidget, &ThumbnailWidget::slowScrollDetected,
+            this, [this](const QSet<int>& visiblePages) {
+                if (m_session && m_session->contentHandler()) {
+                    qDebug() << "NavigationPanel: Slow scroll detected, loading"
+                             << visiblePages.size() << "visible pages";
+                    m_session->contentHandler()->handleVisibleRangeChanged(visiblePages, 0);
+                }
+            });
+
+    // 保留滚动停止时的同步加载连接
     connect(m_thumbnailWidget, &ThumbnailWidget::syncLoadRequested,
             this, [this](const QSet<int>& unloadedVisible) {
                 if (m_session && m_session->contentHandler()) {

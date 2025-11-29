@@ -24,7 +24,7 @@ ThumbnailManagerV2::ThumbnailManagerV2(MuPDFRenderer* renderer, QObject* parent)
     connect(m_batchTimer, &QTimer::timeout, this, &ThumbnailManagerV2::processNextBatch);
 
     qInfo() << "ThumbnailManagerV2: Initialized with"
-            << m_threadPool->maxThreadCount() << "threads";
+            << m_threadPool->maxThreadCount() << "threads (simplified mode)";
 }
 
 ThumbnailManagerV2::~ThumbnailManagerV2()
@@ -50,17 +50,17 @@ void ThumbnailManagerV2::setRotation(int rotation)
 
 QImage ThumbnailManagerV2::getThumbnail(int pageIndex) const
 {
-    return m_cache->get(pageIndex);  // 使用简化后的 get()
+    return m_cache->get(pageIndex);
 }
 
 bool ThumbnailManagerV2::hasThumbnail(int pageIndex) const
 {
-    return m_cache->has(pageIndex);  // 使用简化后的 has()
+    return m_cache->has(pageIndex);
 }
 
 int ThumbnailManagerV2::cachedCount() const
 {
-    return m_cache ? m_cache->count() : 0;  // 使用简化后的 count()
+    return m_cache ? m_cache->count() : 0;
 }
 
 // ========== 加载控制 ==========
@@ -78,13 +78,13 @@ void ThumbnailManagerV2::startLoading(const QSet<int>& initialVisible)
     QString strategyName;
     switch (m_strategy->type()) {
     case LoadStrategyType::SMALL_DOC:
-        strategyName = "Small Document (Full Sync Load)";
+        strategyName = "Small Document (Full Sync)";
         break;
     case LoadStrategyType::MEDIUM_DOC:
-        strategyName = "Medium Document (Batch Load)";
+        strategyName = "Medium Document (Visible Sync + Background Async)";
         break;
     case LoadStrategyType::LARGE_DOC:
-        strategyName = "Large Document (On-Demand)";
+        strategyName = "Large Document (On-Demand Sync Only)";
         break;
     }
 
@@ -93,54 +93,100 @@ void ThumbnailManagerV2::startLoading(const QSet<int>& initialVisible)
 
     QVector<int> initialPages = m_strategy->getInitialLoadPages(initialVisible);
 
-    if (!initialPages.isEmpty()) {
-        if (m_strategy->type() == LoadStrategyType::SMALL_DOC) {
-            // 小文档：同步全量加载
-            m_isLoadingInProgress = true;
-            emit loadingStatusChanged(tr("Loading all thumbnails..."));
-            renderPagesSync(initialPages);
-            emit loadingStatusChanged(tr("All thumbnails loaded"));
-            m_isLoadingInProgress = false;
-            emit allCompleted();
+    if (initialPages.isEmpty()) {
+        return;
+    }
 
-        } else if (m_strategy->type() == LoadStrategyType::MEDIUM_DOC) {
-            // 中文档：标记为加载中
-            m_isLoadingInProgress = true;  // ← 关键：标记批次加载开始
+    if (m_strategy->type() == LoadStrategyType::SMALL_DOC) {
+        // 小文档：同步全量加载
+        m_isLoadingInProgress = true;
+        emit loadingStatusChanged(tr("Loading all thumbnails..."));
+        renderPagesSync(initialPages);
+        emit loadingStatusChanged(tr("All thumbnails loaded"));
+        m_isLoadingInProgress = false;
+        emit allCompleted();
 
-            emit loadingStatusChanged(tr("加载可见区..."));
-            renderPagesSync(initialPages);
-            emit loadingStatusChanged(tr("后台加载中..."));
+    } else if (m_strategy->type() == LoadStrategyType::MEDIUM_DOC) {
+        // 中文档：可见区同步 + 后台批次异步
+        m_isLoadingInProgress = true;
+        emit loadingStatusChanged(tr("加载可见区..."));
+        renderPagesSync(initialPages);
+        emit loadingStatusChanged(tr("后台加载中..."));
+        setupBackgroundBatches();
 
-            setupBackgroundBatches();
-
-        } else {
-            // 大文档：按需加载（不设置 isLoadingInProgress）
-            m_isLoadingInProgress = false;
-            emit loadingStatusChanged(tr("Loading visible thumbnails..."));
-            renderPagesSync(initialPages);
-            emit loadingStatusChanged(tr("Thumbnails will load as you scroll"));
-        }
+    } else {
+        // 大文档：仅同步加载初始可见区，其余按需加载
+        m_isLoadingInProgress = false;  // 不标记为加载中
+        emit loadingStatusChanged(tr("Loading visible thumbnails..."));
+        renderPagesSync(initialPages);
+        emit loadingStatusChanged(tr("Scroll to load more"));
     }
 }
 
-void ThumbnailManagerV2::handleVisibleRangeChanged(const QSet<int>& visiblePages)
+void ThumbnailManagerV2::syncLoadPages(const QVector<int>& pages)
 {
-    // 关键修复：只有大文档且未在批次加载中才响应滚动
+    if (!m_renderer || pages.isEmpty()) {
+        return;
+    }
+
+    // 中文档批次加载期间，忽略同步加载请求
+    if (m_isLoadingInProgress) {
+        qDebug() << "ThumbnailManagerV2: Ignoring sync load during batch loading";
+        return;
+    }
+
+    // 过滤已缓存的页面
+    QVector<int> toLoad;
+    for (int pageIndex : pages) {
+        if (!m_cache->has(pageIndex)) {
+            toLoad.append(pageIndex);
+        }
+    }
+
+    if (toLoad.isEmpty()) {
+        return;
+    }
+
+    qInfo() << "ThumbnailManagerV2: Sync loading" << toLoad.size()
+            << "pages (strategy:"
+            << (m_strategy ? static_cast<int>(m_strategy->type()) : -1) << ")";
+
+    // 同步渲染
+    renderPagesSync(toLoad);
+}
+
+void ThumbnailManagerV2::handleSlowScroll(const QSet<int>& visiblePages)
+{
+    if (!m_renderer || visiblePages.isEmpty()) {
+        return;
+    }
+
+    // 仅大文档且未在批次加载中时响应慢速滚动
     if (!m_strategy || m_strategy->type() != LoadStrategyType::LARGE_DOC) {
         return;
     }
 
     if (m_isLoadingInProgress) {
-        qDebug() << "ThumbnailManagerV2: Ignoring scroll during batch loading";
         return;
     }
 
-    // 大文档：按需加载
-    QVector<int> toLoad = m_strategy->handleVisibleChange(visiblePages);
-
-    if (!toLoad.isEmpty()) {
-        renderPagesAsync(toLoad, RenderPriority::HIGH);
+    // 过滤未缓存的页面
+    QVector<int> toLoad;
+    for (int pageIndex : visiblePages) {
+        if (!m_cache->has(pageIndex)) {
+            toLoad.append(pageIndex);
+        }
     }
+
+    if (toLoad.isEmpty()) {
+        return;
+    }
+
+    qDebug() << "ThumbnailManagerV2: Slow scroll detected, loading"
+             << toLoad.size() << "visible pages";
+
+    // 同步加载可见区域
+    renderPagesSync(toLoad);
 }
 
 void ThumbnailManagerV2::cancelAllTasks()
@@ -174,7 +220,7 @@ void ThumbnailManagerV2::clear()
 
     m_backgroundBatches.clear();
     m_currentBatchIndex = 0;
-    m_isLoadingInProgress = false;  // 重置状态
+    m_isLoadingInProgress = false;
 }
 
 QString ThumbnailManagerV2::getStatistics() const
@@ -182,35 +228,11 @@ QString ThumbnailManagerV2::getStatistics() const
     return m_cache ? m_cache->getStatistics() : QString();
 }
 
-void ThumbnailManagerV2::syncLoadPages(const QVector<int>& pages)
+bool ThumbnailManagerV2::shouldRespondToScroll() const
 {
-    if (!m_renderer || pages.isEmpty()) {
-        return;
-    }
-
-    // 关键修复：如果正在批次加载中，忽略同步加载请求
-    if (m_isLoadingInProgress) {
-        qDebug() << "ThumbnailManagerV2: Ignoring sync load during batch loading";
-        return;
-    }
-
-    // 过滤已缓存的页面
-    QVector<int> toLoad;
-    for (int pageIndex : pages) {
-        if (!m_cache->has(pageIndex)) {
-            toLoad.append(pageIndex);
-        }
-    }
-
-    if (toLoad.isEmpty()) {
-        return;
-    }
-
-    qInfo() << "ThumbnailManagerV2: Sync loading" << toLoad.size()
-            << "unloaded pages after scroll stop";
-
-    // 同步渲染
-    renderPagesSync(toLoad);
+    // 大文档在批次加载期间不响应滚动
+    // 注意：大文档的m_isLoadingInProgress始终为false，所以会响应
+    return !m_isLoadingInProgress;
 }
 
 // ========== 私有方法 ==========
@@ -265,9 +287,10 @@ void ThumbnailManagerV2::renderPagesAsync(const QVector<int>& pages, RenderPrior
         return;
     }
 
+    // 过滤已缓存的页面
     QVector<int> toRender;
     for (int pageIndex : pages) {
-        if (!m_cache->has(pageIndex)) {  // 使用简化后的 has()
+        if (!m_cache->has(pageIndex)) {
             toRender.append(pageIndex);
         }
     }
@@ -285,7 +308,7 @@ void ThumbnailManagerV2::renderPagesAsync(const QVector<int>& pages, RenderPrior
         this,
         toRender,
         priority,
-        m_thumbnailWidth,  // 简化：只需要一个宽度参数
+        m_thumbnailWidth,
         m_rotation
         );
 
@@ -304,7 +327,7 @@ void ThumbnailManagerV2::setupBackgroundBatches()
 
     if (!m_backgroundBatches.isEmpty()) {
         qInfo() << "ThumbnailManagerV2: Setup" << m_backgroundBatches.size()
-        << "background batches";
+        << "background batches for medium document";
 
         // 延迟启动第一批
         QTimer::singleShot(500, this, &ThumbnailManagerV2::processNextBatch);
@@ -316,7 +339,7 @@ void ThumbnailManagerV2::processNextBatch()
     if (m_currentBatchIndex >= m_backgroundBatches.size()) {
         qInfo() << "ThumbnailManagerV2: All background batches completed";
 
-        m_isLoadingInProgress = false;  // ← 关键：标记批次加载完成
+        m_isLoadingInProgress = false;  // 标记批次加载完成
 
         emit loadingStatusChanged(tr("All thumbnails loaded"));
         emit allCompleted();
@@ -331,6 +354,7 @@ void ThumbnailManagerV2::processNextBatch()
 
     emit loadingStatusChanged(tr("加载中..."));
 
+    // 中文档后台批次使用异步渲染
     renderPagesAsync(batch, RenderPriority::LOW);
 
     emit batchCompleted(m_currentBatchIndex + 1, m_backgroundBatches.size());
@@ -340,17 +364,9 @@ void ThumbnailManagerV2::processNextBatch()
     if (m_currentBatchIndex < m_backgroundBatches.size()) {
         m_batchTimer->start();
     } else {
-        m_isLoadingInProgress = false;  // ← 关键：标记批次加载完成
+        m_isLoadingInProgress = false;  // 标记批次加载完成
         emit allCompleted();
     }
-}
-
-bool ThumbnailManagerV2::shouldRespondToScroll() const
-{
-    // 只有大文档且未在批次加载中才响应滚动
-    return m_strategy
-           && m_strategy->type() == LoadStrategyType::LARGE_DOC
-           && !m_isLoadingInProgress;
 }
 
 void ThumbnailManagerV2::trackTask(ThumbnailBatchTask* task)
@@ -358,5 +374,3 @@ void ThumbnailManagerV2::trackTask(ThumbnailBatchTask* task)
     QMutexLocker locker(&m_taskMutex);
     m_activeTasks.append(task);
 }
-
-

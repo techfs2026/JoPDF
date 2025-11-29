@@ -164,17 +164,14 @@ void PDFContentHandler::loadThumbnails()
 
 void PDFContentHandler::handleVisibleRangeChanged(const QSet<int>& visibleIndices, int margin)
 {
+    Q_UNUSED(margin);
+
     if (!m_thumbnailManager) {
         return;
     }
 
-    // 检查是否应该响应滚动（只有大文档且未在批次加载中）
-    if (!m_thumbnailManager->shouldRespondToScroll()) {
-        return;
-    }
-
-    // 大文档按需加载
-    m_thumbnailManager->handleVisibleRangeChanged(visibleIndices);
+    // 仅大文档慢速滚动时响应
+    m_thumbnailManager->handleSlowScroll(visibleIndices);
 }
 
 void PDFContentHandler::startInitialThumbnailLoad(const QSet<int>& initialVisible)
@@ -197,8 +194,11 @@ void PDFContentHandler::syncLoadUnloadedPages(const QSet<int>& unloadedPages)
     }
 
     // 转换为 QVector 并同步加载
-    // syncLoadPages 内部会检查 m_isLoadingInProgress，批次加载期间会忽略
     QVector<int> pagesToLoad = unloadedPages.values().toVector();
+
+    qInfo() << "PDFContentHandler: Sync loading" << pagesToLoad.size()
+            << "unloaded pages after scroll stop";
+
     m_thumbnailManager->syncLoadPages(pagesToLoad);
 }
 

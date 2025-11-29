@@ -15,10 +15,10 @@ class ThumbnailItem;
 class ThumbnailManagerV2;
 
 enum class ScrollState {
-    IDLE,
-    SLOW_SCROLL,
-    FAST_SCROLL,
-    FLING
+    IDLE,         // 静止或极慢 (< 500 px/s)   → 触发加载
+    SLOW_SCROLL,  // 慢速滚动 (500-1000 px/s)  → 触发加载
+    FAST_SCROLL,  // 快速滚动 (1000-3000 px/s) → 不加载
+    FLING         // 惯性滑动 (> 3000 px/s)    → 不加载
 };
 
 class ThumbnailWidget : public QScrollArea
@@ -48,6 +48,7 @@ signals:
     void visibleRangeChanged(const QSet<int>& visibleIndices, int margin);
     void initialVisibleReady(const QSet<int>& initialVisible);
     void syncLoadRequested(const QSet<int>& unloadedVisible);
+    void slowScrollDetected(const QSet<int>& visiblePages);
 
 public slots:
     void onThumbnailLoaded(int pageIndex, const QImage& thumbnail);  // 移除 isHighRes 参数

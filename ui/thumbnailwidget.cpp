@@ -180,10 +180,12 @@ void ThumbnailWidget::scrollContentsBy(int dx, int dy)
 
     m_scrollState = detectScrollState();
 
+    // 启动 throttle 计时器用于慢速滚动检测
     if (!m_throttleTimer->isActive()) {
         m_throttleTimer->start();
     }
 
+    // 重启 debounce 计时器（用于检测滚动停止）
     m_debounceTimer->start();
 }
 
@@ -217,10 +219,22 @@ void ThumbnailWidget::resizeEvent(QResizeEvent* event)
 
 void ThumbnailWidget::onScrollThrottle()
 {
-    // 只有在应该响应滚动时才通知
-    if (m_manager && m_manager->shouldRespondToScroll()) {
-        notifyVisibleRange();
+    // 慢速滚动检测：仅在 IDLE 或 SLOW_SCROLL 状态时通知
+    if (m_scrollState == ScrollState::IDLE ||
+        m_scrollState == ScrollState::SLOW_SCROLL) {
+
+        // 检查 manager 是否应该响应滚动
+        if (m_manager && m_manager->shouldRespondToScroll()) {
+            QSet<int> visiblePages = getVisibleIndices(0);  // 不带 margin
+
+            if (!visiblePages.isEmpty()) {
+                qDebug() << "ThumbnailWidget: Slow scroll detected, notifying"
+                         << visiblePages.size() << "visible pages";
+                emit slowScrollDetected(visiblePages);
+            }
+        }
     }
+    // 快速滚动和 FLING 状态不触发加载，保证流畅性
 }
 
 void ThumbnailWidget::onScrollDebounce()
@@ -230,7 +244,7 @@ void ThumbnailWidget::onScrollDebounce()
 
     qDebug() << "ThumbnailWidget: Scroll stopped";
 
-    // 检查是否应该响应滚动(避免批次加载期间触发)
+    // 检查是否应该响应滚动停止（避免批次加载期间触发）
     if (m_manager && !m_manager->shouldRespondToScroll()) {
         qDebug() << "ThumbnailWidget: Ignoring scroll stop during batch loading";
         return;
@@ -240,16 +254,13 @@ void ThumbnailWidget::onScrollDebounce()
     QSet<int> unloadedVisible = getUnloadedVisiblePages();
 
     qDebug() << "ThumbnailWidget: unloadedVisible count =" << unloadedVisible.size();
+
     if (!unloadedVisible.isEmpty()) {
-        qInfo() << "ThumbnailWidget onScrollDebounce: Found" << unloadedVisible.size()
+        qInfo() << "ThumbnailWidget: Found" << unloadedVisible.size()
         << "unloaded visible pages after scroll stop, triggering sync load";
 
+        // 发送同步加载请求
         emit syncLoadRequested(unloadedVisible);
-    }
-
-    // 继续正常的可见区域通知(用于预加载周边页面)
-    if (m_manager && m_manager->shouldRespondToScroll()) {
-        notifyVisibleRange();
     }
 }
 

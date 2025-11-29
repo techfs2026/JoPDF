@@ -115,7 +115,7 @@ public:
 
 private:
     static constexpr int SMALL_DOC_THRESHOLD = 50;
-    static constexpr int MEDIUM_DOC_THRESHOLD = 300;
+    static constexpr int MEDIUM_DOC_THRESHOLD = 400;
 };
 
 #endif // THUMBNAILLOADSTRATEGY_H

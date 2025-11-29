@@ -14,7 +14,12 @@ class MuPDFRenderer;
 class ThumbnailCache;
 
 /**
- * @brief 智能缩略图管理器 V2 - 基于文档大小的自适应加载策略
+ * @brief 智能缩略图管理器 V2 - 简化版
+ *
+ * 加载策略:
+ * - 小文档(<50页): 全量同步加载
+ * - 中文档(50-200页): 可见区同步 + 后台批次异步
+ * - 大文档(>200页): 仅按需同步加载(滚动停止时)
  */
 class ThumbnailManagerV2 : public QObject
 {
@@ -41,12 +46,22 @@ public:
     void startLoading(const QSet<int>& initialVisible);
 
     /**
-     * @brief 处理可见区域变化（仅对大文档有效）
+     * @brief 同步加载指定页面（主要用于大文档滚动停止后）
+     * @param pages 需要加载的页面索引
      */
-    void handleVisibleRangeChanged(const QSet<int>& visiblePages);
+    void syncLoadPages(const QVector<int>& pages);
 
     /**
-     * @brief 取消所有任务
+     * @brief 处理慢速滚动（大文档专用）
+     * @param visiblePages 当前可见的页面索引
+     *
+     * 当检测到用户慢速滚动时调用，同步加载可见区域。
+     * 仅对大文档生效，快速滚动时不会调用此方法。
+     */
+    void handleSlowScroll(const QSet<int>& visiblePages);
+
+    /**
+     * @brief 取消所有后台任务（仅中文档使用）
      */
     void cancelAllTasks();
 
@@ -55,13 +70,15 @@ public:
      */
     void waitForCompletion();
 
-    void syncLoadPages(const QVector<int>& pages);
-
     // ========== 管理 ==========
     void clear();
     QString getStatistics() const;
     int cachedCount() const;
 
+    /**
+     * @brief 是否应该响应滚动事件
+     * @return 仅大文档且未在批次加载中时返回false
+     */
     bool shouldRespondToScroll() const;
 
 signals:
@@ -77,9 +94,16 @@ private slots:
     void processNextBatch();
 
 private:
+    // 同步渲染（小文档、中文档初始可见区、大文档按需加载）
     void renderPagesSync(const QVector<int>& pages);
+
+    // 异步渲染（仅中文档后台批次使用）
     void renderPagesAsync(const QVector<int>& pages, RenderPriority priority);
+
+    // 设置中文档后台批次
     void setupBackgroundBatches();
+
+    void trackTask(ThumbnailBatchTask* task);
 
 private:
     MuPDFRenderer* m_renderer;
@@ -90,18 +114,16 @@ private:
     int m_thumbnailWidth;
     int m_rotation;
 
-    // 批次管理
+    // 批次管理（仅中文档使用）
     QVector<QVector<int>> m_backgroundBatches;
     int m_currentBatchIndex;
     QTimer* m_batchTimer;
 
-    // 任务跟踪
+    // 任务跟踪（仅中文档使用）
     QMutex m_taskMutex;
     QVector<ThumbnailBatchTask*> m_activeTasks;
 
-    bool m_isLoadingInProgress;  // 标记是否正在批次加载中
-
-    void trackTask(ThumbnailBatchTask* task);
+    bool m_isLoadingInProgress;  // 标记中文档是否正在批次加载中
 };
 
 #endif // THUMBNAILMANAGER_V2_H
