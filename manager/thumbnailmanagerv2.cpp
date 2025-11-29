@@ -17,8 +17,7 @@ ThumbnailManagerV2::ThumbnailManagerV2(MuPDFRenderer* renderer, QObject* parent)
     , m_isLoadingInProgress(false)
     , m_devicePixelRatio(1.0)
 {
-    qDebug() << "idle thread count:" << QThread::idealThreadCount();
-    int threadCount = qMin(4, QThread::idealThreadCount() / 2);
+    int threadCount = qMax(4, QThread::idealThreadCount() / 3);
     m_threadPool->setMaxThreadCount(threadCount);
     m_threadPool->setExpiryTimeout(30000);
 
@@ -205,15 +204,14 @@ void ThumbnailManagerV2::cancelAllTasks()
 {
     QMutexLocker locker(&m_taskMutex);
 
-    for (ThumbnailBatchTask* task : m_activeTasks) {
-        if (task) {
-            task->abort();
-        }
-    }
-
-    m_activeTasks.clear();
     m_batchTimer->stop();
     m_currentBatchIndex = 0;
+
+    // 等待所有任务完成（自动删除）
+    if (m_threadPool) {
+        m_threadPool->clear();        // 清除还没开始的任务
+        m_threadPool->waitForDone();  // 等待所有正在运行的任务完成
+    }
 }
 
 void ThumbnailManagerV2::waitForCompletion()
@@ -358,7 +356,6 @@ void ThumbnailManagerV2::renderPagesAsync(const QVector<int>& pages, RenderPrior
         m_devicePixelRatio  // 传递设备像素比
         );
 
-    trackTask(task);
     m_threadPool->start(task, static_cast<int>(priority));
 }
 
@@ -411,10 +408,4 @@ void ThumbnailManagerV2::processNextBatch()
         m_isLoadingInProgress = false;
         emit allCompleted();
     }
-}
-
-void ThumbnailManagerV2::trackTask(ThumbnailBatchTask* task)
-{
-    QMutexLocker locker(&m_taskMutex);
-    m_activeTasks.append(task);
 }

@@ -131,7 +131,6 @@ private:
 
     // 任务跟踪（仅中文档使用）
     QMutex m_taskMutex;
-    QVector<ThumbnailBatchTask*> m_activeTasks;
 
     bool m_isLoadingInProgress;
 };

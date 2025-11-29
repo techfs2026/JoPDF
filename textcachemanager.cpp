@@ -198,7 +198,7 @@ void TextCacheManager::startPreload()
     m_remainingTasks.storeRelease(pageCount);
 
     // 配置线程池（使用一半的CPU核心）
-    int threadCount = qMax(1, QThread::idealThreadCount() / 2);
+    int threadCount = qMax(4, QThread::idealThreadCount() / 2);
     m_threadPool.setMaxThreadCount(threadCount);
 
     // 计算每个批次的大小

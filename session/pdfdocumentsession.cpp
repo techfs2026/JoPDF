@@ -46,6 +46,7 @@ PDFDocumentSession::PDFDocumentSession(QObject* parent)
 
 PDFDocumentSession::~PDFDocumentSession()
 {
+    disconnect(m_interactionHandler.get(), nullptr, this, nullptr);
     closeDocument();
     qInfo() << "PDFDocumentSession: Destroyed";
 }
