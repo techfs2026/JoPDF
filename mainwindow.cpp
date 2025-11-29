@@ -242,12 +242,24 @@ void MainWindow::onTabChanged(int index)
     PDFDocumentTab* tab = currentTab();
 
     if (tab && tab->isDocumentLoaded()) {
-        m_showNavigationAction->setChecked(m_navigationDock->isVisible());
+        // 切换到已加载文档的标签页
+
+        // 1. 设置导航面板为当前标签页的导航面板
+        if (tab->navigationPanel()) {
+            m_navigationDock->setWidget(tab->navigationPanel());
+
+            // 2. 恢复该标签页的导航面板可见性状态
+            // 如果之前是显示的,保持显示;如果之前是隐藏的,保持隐藏
+            bool shouldShow = m_showNavigationAction->isChecked();
+            m_navigationDock->setVisible(shouldShow);
+            m_navPanelAction->setChecked(shouldShow);
+        }
     } else {
-        // 无文档或无 tab，隐藏导航面板
+        // 无文档或无 tab,隐藏导航面板
         m_navigationDock->setWidget(nullptr);
         m_navigationDock->setVisible(false);
         m_showNavigationAction->setChecked(false);
+        m_navPanelAction->setChecked(false);
     }
 
     updateUIState();
@@ -383,6 +395,12 @@ void MainWindow::toggleNavigationPanel()
 
     // 切换可见性
     bool visible = !m_navigationDock->isVisible();
+
+    // 如果要显示,先确保设置了正确的widget
+    if (visible && tab->navigationPanel()) {
+        m_navigationDock->setWidget(tab->navigationPanel());
+    }
+
     m_navigationDock->setVisible(visible);
     m_navPanelAction->setChecked(visible);
     m_showNavigationAction->setChecked(visible);
@@ -542,18 +560,23 @@ void MainWindow::onCurrentTabDocumentLoaded(const QString& filePath, int pageCou
         updateTabTitle(index);
     }
 
-    // 如果是当前标签页，更新UI
+    // 如果是当前标签页,更新UI
     if (tab == currentTab()) {
         updateWindowTitle();
         updateUIState();
 
+        // 设置导航面板
         if (tab->isDocumentLoaded() && tab->navigationPanel()) {
             m_navigationDock->setWidget(tab->navigationPanel());
+
+            // 文档加载时默认显示导航面板
             m_navigationDock->setVisible(true);
             m_showNavigationAction->setChecked(true);
             m_navPanelAction->setChecked(true);
         }
     }
+    // 如果不是当前标签页,但该标签页的文档已加载
+    // 不做任何操作,等待用户切换到该标签页时再更新导航面板
 }
 
 void MainWindow::onCurrentTabSearchCompleted(const QString& query, int totalMatches)
