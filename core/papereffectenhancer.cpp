@@ -3,61 +3,6 @@
 #include <QElapsedTimer>
 #include <QMutexLocker>
 
-
-static void applyPaperEffectOptimized(cv::Mat& img)
-{
-    if (img.empty() || img.channels() != 3) return;
-
-    // 全局亮度调节系数（0~1，越小越暗）
-    const float globalBrightnessFactor = 0.88f;
-
-    cv::Mat lab;
-    cv::cvtColor(img, lab, cv::COLOR_BGR2Lab);
-
-    std::vector<cv::Mat> cs;
-    cv::split(lab, cs);
-    cv::Mat& L = cs[0]; // 亮度
-    cv::Mat& A = cs[1]; // a通道
-    cv::Mat& B = cs[2]; // b通道
-
-    for (int y = 0; y < img.rows; ++y) {
-        uchar* lptr = L.ptr<uchar>(y);
-        uchar* aptr = A.ptr<uchar>(y);
-        uchar* bptr = B.ptr<uchar>(y);
-
-        for (int x = 0; x < img.cols; ++x) {
-            float lum = lptr[x];
-
-            // ---------- 背景护眼黄色 ----------
-            float alpha_bg = 0.0f;
-            if (lum < 200.0f) alpha_bg = 0.38f;       // 暗区增强黄
-            else if (lum < 230.0f) alpha_bg = 0.20f;  // 中亮区偏黄
-            else alpha_bg = 0.08f;                     // 高亮区轻黄
-
-            aptr[x] = cv::saturate_cast<uchar>(aptr[x] + alpha_bg * 5.0f);
-            bptr[x] = cv::saturate_cast<uchar>(bptr[x] + alpha_bg * 36.0f);
-
-            // ---------- L通道亮度调整（加入全局亮度系数） ----------
-            if (lum < 200) lptr[x] = cv::saturate_cast<uchar>(lptr[x] * 0.78f * globalBrightnessFactor);
-            else if (lum < 230) lptr[x] = cv::saturate_cast<uchar>(lptr[x] * 0.85f * globalBrightnessFactor);
-            else lptr[x] = cv::saturate_cast<uchar>(lptr[x] * 0.93f * globalBrightnessFactor);
-
-            // ---------- 文字加黑（柔和护眼） ----------
-            if (lum < 160.0f) {
-                float alpha_text = (160.0f - lum) / 160.0f;
-                float darken_factor = 0.10f + 0.12f * alpha_text;
-                lptr[x] = cv::saturate_cast<uchar>(lptr[x] * (1.0f - darken_factor));
-
-                bptr[x] = cv::saturate_cast<uchar>(bptr[x] - alpha_text * 2.0f);
-            }
-        }
-    }
-
-    cv::merge(cs, lab);
-    cv::cvtColor(lab, img, cv::COLOR_Lab2BGR);
-}
-
-
 PaperEffectEnhancer::PaperEffectEnhancer(const Options& opt)
     : m_options(opt)
 {
@@ -562,6 +507,59 @@ void PaperEffectEnhancer::autoAdjustParameters(const cv::Mat& img)
     } else if (brightness > 185) {
         m_options.gamma = std::min(0.88, m_options.gamma + 0.02);
     }
+}
+
+void PaperEffectEnhancer::applyPaperEffectOptimized(cv::Mat& img)
+{
+    if (img.empty() || img.channels() != 3) return;
+
+    // 全局亮度调节系数（0~1，越小越暗）
+    const float globalBrightnessFactor = 0.88f;
+
+    cv::Mat lab;
+    cv::cvtColor(img, lab, cv::COLOR_BGR2Lab);
+
+    std::vector<cv::Mat> cs;
+    cv::split(lab, cs);
+    cv::Mat& L = cs[0]; // 亮度
+    cv::Mat& A = cs[1]; // a通道
+    cv::Mat& B = cs[2]; // b通道
+
+    for (int y = 0; y < img.rows; ++y) {
+        uchar* lptr = L.ptr<uchar>(y);
+        uchar* aptr = A.ptr<uchar>(y);
+        uchar* bptr = B.ptr<uchar>(y);
+
+        for (int x = 0; x < img.cols; ++x) {
+            float lum = lptr[x];
+
+            // ---------- 背景护眼黄色 ----------
+            float alpha_bg = 0.0f;
+            if (lum < 200.0f) alpha_bg = 0.38f;       // 暗区增强黄
+            else if (lum < 230.0f) alpha_bg = 0.20f;  // 中亮区偏黄
+            else alpha_bg = 0.08f;                     // 高亮区轻黄
+
+            aptr[x] = cv::saturate_cast<uchar>(aptr[x] + alpha_bg * 5.0f);
+            bptr[x] = cv::saturate_cast<uchar>(bptr[x] + alpha_bg * 36.0f);
+
+            // ---------- L通道亮度调整（加入全局亮度系数） ----------
+            if (lum < 200) lptr[x] = cv::saturate_cast<uchar>(lptr[x] * 0.78f * globalBrightnessFactor);
+            else if (lum < 230) lptr[x] = cv::saturate_cast<uchar>(lptr[x] * 0.85f * globalBrightnessFactor);
+            else lptr[x] = cv::saturate_cast<uchar>(lptr[x] * 0.93f * globalBrightnessFactor);
+
+            // ---------- 文字加黑（柔和护眼） ----------
+            if (lum < 160.0f) {
+                float alpha_text = (160.0f - lum) / 160.0f;
+                float darken_factor = 0.10f + 0.12f * alpha_text;
+                lptr[x] = cv::saturate_cast<uchar>(lptr[x] * (1.0f - darken_factor));
+
+                bptr[x] = cv::saturate_cast<uchar>(bptr[x] - alpha_text * 2.0f);
+            }
+        }
+    }
+
+    cv::merge(cs, lab);
+    cv::cvtColor(lab, img, cv::COLOR_Lab2BGR);
 }
 
 

@@ -39,6 +39,8 @@ private:
     bool isColorImage(const cv::Mat& img);
     void autoAdjustParameters(const cv::Mat& img);
 
+    void applyPaperEffectOptimized(cv::Mat& img);
+
     Options m_options;
     cv::Ptr<cv::CLAHE> m_clahe;
     QMutex m_mutex;
