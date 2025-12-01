@@ -119,6 +119,8 @@ public:
      */
     void findPrevious();
 
+    void applyModernStyle();
+
 signals:
     // ==================== 状态通知信号（给外部） ====================
 

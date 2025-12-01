@@ -28,7 +28,7 @@ OutlineWidget::OutlineWidget(PDFContentHandler* contentHandler, QWidget* parent)
     , m_draggedItem(nullptr)
 {
     setupUI();
-    applyStyleSheet();
+    applyModernStyle();
 
     m_overlay = new DragOverlayWidget(viewport());
     m_overlay->resize(viewport()->size());
@@ -76,7 +76,7 @@ void OutlineWidget::setupUI()
             this, &OutlineWidget::onItemClicked);
 }
 
-void OutlineWidget::applyStyleSheet()
+void OutlineWidget::applyModernStyle()
 {
     QFile styleFile(":styles/resources/styles/outline.qss");
     if (styleFile.open(QFile::ReadOnly)) {
@@ -194,29 +194,6 @@ void OutlineWidget::highlightCurrentPage(int pageIndex)
         scrollToItem(item, QAbstractItemView::PositionAtCenter);
     } else {
         m_currentHighlight = nullptr;
-    }
-
-    viewport()->update();
-}
-
-void OutlineWidget::setDarkMode(bool dark)
-{
-    if (m_darkMode == dark) {
-        return;
-    }
-
-    m_darkMode = dark;
-    applyStyleSheet();
-
-    // 更新代理的暗色模式
-    if (m_itemDelegate) {
-        m_itemDelegate->setDarkMode(dark);
-    }
-
-    // 重新高亮当前页
-    if (m_currentHighlight) {
-        int currentPage = m_currentHighlight->data(0, PageIndexRole).toInt();
-        highlightCurrentPage(currentPage);
     }
 
     viewport()->update();

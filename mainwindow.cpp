@@ -699,7 +699,7 @@ void MainWindow::createToolBar()
     m_toolBar->setFloatable(false);
     m_toolBar->setIconSize(QSize(20, 20));
     m_toolBar->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    m_toolBar->setContentsMargins(8, 4, 8, 4);
+    m_toolBar->setContentsMargins(0, 0, 0, 0);  // 移除外边距
     m_toolBar->setObjectName("mainToolBar");
 
     // ========== 导航面板按钮 ==========
@@ -726,14 +726,11 @@ void MainWindow::createToolBar()
     m_previousPageAction->setToolTip(tr("上一页 (PgUp)"));
     connect(m_previousPageAction, &QAction::triggered, this, &MainWindow::previousPage);
 
-    // 页码输入
-    m_toolBar->addWidget(new QLabel("  "));
+    // 页码输入 - 移除前面的空Label
     m_pageSpinBox = new QSpinBox(this);
     m_pageSpinBox->setMinimum(1);
     m_pageSpinBox->setMaximum(1);
     m_pageSpinBox->setEnabled(false);
-    m_pageSpinBox->setMinimumWidth(70);
-    m_pageSpinBox->setMaximumWidth(100);
     m_pageSpinBox->setAlignment(Qt::AlignCenter);
     m_pageSpinBox->setButtonSymbols(QAbstractSpinBox::NoButtons);
     m_pageSpinBox->setObjectName("pageSpinBox");
@@ -758,8 +755,6 @@ void MainWindow::createToolBar()
 
     m_zoomComboBox = new QComboBox(this);
     m_zoomComboBox->setEditable(true);
-    m_zoomComboBox->setMinimumWidth(85);
-    m_zoomComboBox->setMaximumWidth(100);
     m_zoomComboBox->setObjectName("zoomComboBox");
     m_zoomComboBox->addItems({
         "25%", "50%", "75%", "100%", "125%", "150%", "200%", "300%", "400%"

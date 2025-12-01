@@ -60,39 +60,62 @@ void PDFDocumentTab::setupUI()
     // 创建导航面板
     m_navigationPanel = new NavigationPanel(m_session, this);
     m_navigationPanel->setVisible(false);
+    m_navigationPanel->setObjectName("navigationPanel");
 
-    // 创建滚动区域
+    // 创建滚动区域 - 使用纸质感背景色
     m_scrollArea = new QScrollArea(this);
     m_scrollArea->setWidgetResizable(false);
     m_scrollArea->setAlignment(Qt::AlignCenter);
     m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_scrollArea->setFrameShape(QFrame::NoFrame);
+    m_scrollArea->setObjectName("pdfScrollArea");
 
     // 创建页面显示组件
     m_pageWidget = new PDFPageWidget(m_session, this);
+    m_pageWidget->setObjectName("pdfPageWidget");
     m_scrollArea->setWidget(m_pageWidget);
 
     // 创建搜索工具栏
     m_searchWidget = new SearchWidget(m_session, this);
     m_searchWidget->setVisible(false);
+    m_searchWidget->setObjectName("searchWidget");
 
-    // 创建进度条
+    // 创建进度条 - 使用纸质感样式
     m_textPreloadProgress = new QProgressBar(this);
-    m_textPreloadProgress->setMaximumWidth(200);
-    m_textPreloadProgress->setMaximumHeight(20);
+    m_textPreloadProgress->setMaximumWidth(220);
+    m_textPreloadProgress->setMaximumHeight(24);
     m_textPreloadProgress->setVisible(false);
     m_textPreloadProgress->setTextVisible(true);
     m_textPreloadProgress->setAlignment(Qt::AlignCenter);
+    m_textPreloadProgress->setObjectName("textPreloadProgress");
 
     // 组装主布局
     mainLayout->addWidget(m_searchWidget);
     mainLayout->addWidget(m_scrollArea, 1);
-    mainLayout->addWidget(m_textPreloadProgress);
 
-    // 设置样式
-    m_scrollArea->setStyleSheet("QScrollArea { background-color: #F0F0F0; border: none; }");
+    // 进度条居中显示
+    QHBoxLayout* progressLayout = new QHBoxLayout();
+    progressLayout->addStretch();
+    progressLayout->addWidget(m_textPreloadProgress);
+    progressLayout->addStretch();
+    progressLayout->setContentsMargins(0, 8, 0, 8);
+    mainLayout->addLayout(progressLayout);
+
+    // 应用样式
+    applyModernStyle();
 }
+
+void PDFDocumentTab::applyModernStyle()
+{
+    QFile styleFile(":styles/resources/styles/pdfdocument.qss");
+    if (styleFile.open(QFile::ReadOnly)) {
+        QString style = QLatin1String(styleFile.readAll());
+        setStyleSheet(style);
+        styleFile.close();
+    }
+}
+
 
 void PDFDocumentTab::setupConnections()
 {

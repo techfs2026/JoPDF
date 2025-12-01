@@ -45,7 +45,7 @@ protected:
             if (opt.state & QStyle::State_Selected) {
                 painter.fillRect(rect, QColor(255, 255, 255));
                 // 左侧指示线
-                painter.fillRect(rect.left(), rect.top(), 2, rect.height(), QColor(0, 0, 200));
+                painter.fillRect(rect.left(), rect.top(), 2, rect.height(), QColor(33, 150, 243));
             } else if (opt.state & QStyle::State_MouseOver) {
                 painter.fillRect(rect, QColor(245, 245, 243));
             }
@@ -208,14 +208,14 @@ void NavigationPanel::setupUI()
     toolbarLayout->setSpacing(8);
 
     m_expandAllBtn = new QToolButton(this);
-    m_expandAllBtn->setIcon(QIcon(":/resources/icons/icons/expand.png"));
+    m_expandAllBtn->setIcon(QIcon(":icons/resources/icons/expand.png"));
     m_expandAllBtn->setToolTip(tr("展开全部"));
     m_expandAllBtn->setObjectName("outlineToolButton");
     m_expandAllBtn->setFixedSize(28, 28);
     m_expandAllBtn->setIconSize(QSize(14, 14));
 
     m_collapseAllBtn = new QToolButton(this);
-    m_collapseAllBtn->setIcon(QIcon(":/resources/icons/icons/fold.png"));
+    m_collapseAllBtn->setIcon(QIcon(":icons/resources/icons/fold.png"));
     m_collapseAllBtn->setToolTip(tr("折叠全部"));
     m_collapseAllBtn->setObjectName("outlineToolButton");
     m_collapseAllBtn->setFixedSize(28, 28);

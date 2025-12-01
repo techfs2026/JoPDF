@@ -252,7 +252,6 @@ public:
     bool loadOutline();
     void clear();
     void highlightCurrentPage(int pageIndex);
-    void setDarkMode(bool dark);
     bool isDarkMode() const { return m_darkMode; }
     void setEditEnabled(bool enabled) { m_editEnabled = enabled; }
     bool isEditEnabled() const { return m_editEnabled; }
@@ -284,7 +283,7 @@ private slots:
 
 private:
     void setupUI();
-    void applyStyleSheet();
+    void applyModernStyle();
     QMenu* createContextMenu(QTreeWidgetItem* item);
     void buildTree(OutlineItem* outlineItem, QTreeWidgetItem* treeItem);
     QTreeWidgetItem* createTreeItem(OutlineItem* outlineItem);
