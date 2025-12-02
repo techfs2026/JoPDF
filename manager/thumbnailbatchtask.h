@@ -27,6 +27,8 @@ enum class RenderPriority {
 class ThumbnailBatchTask : public QRunnable
 {
 public:
+    using FinishCallback = std::function<void()>;
+
     ThumbnailBatchTask(const QString& docPath,
                        ThumbnailCache* cache,
                        ThumbnailManagerV2* manager,
@@ -34,7 +36,8 @@ public:
                        RenderPriority priority,
                        int thumbnailWidth,        // 实际渲染宽度（已乘以DPR）
                        int rotation,
-                       double devicePixelRatio);  // 设备像素比
+                       double devicePixelRatio,   // 设备像素比
+                       FinishCallback cb);
 
     ~ThumbnailBatchTask();
 
@@ -55,6 +58,8 @@ private:
     int m_rotation;
     double m_devicePixelRatio;   // 设备像素比
     QAtomicInt m_aborted;
+
+    FinishCallback m_finishCallback;
 };
 
 #endif // THUMBNAILBATCHTASK_H

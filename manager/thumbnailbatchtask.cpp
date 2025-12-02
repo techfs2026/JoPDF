@@ -12,7 +12,8 @@ ThumbnailBatchTask::ThumbnailBatchTask(const QString& docPath,
                                        RenderPriority priority,
                                        int thumbnailWidth,
                                        int rotation,
-                                       double devicePixelRatio)
+                                       double devicePixelRatio,
+                                       FinishCallback cb)
     : m_renderer(std::make_unique<PerThreadMuPDFRenderer>(docPath))
     , m_cache(cache)
     , m_manager(manager)
@@ -22,6 +23,7 @@ ThumbnailBatchTask::ThumbnailBatchTask(const QString& docPath,
     , m_rotation(rotation)
     , m_devicePixelRatio(devicePixelRatio)
     , m_aborted(0)
+    , m_finishCallback(cb)
 {
     setAutoDelete(true);
 }
@@ -104,6 +106,10 @@ void ThumbnailBatchTask::run()
         }
 
         rendered++;
+    }
+
+    if (m_finishCallback) {
+        m_finishCallback();
     }
 
     qint64 elapsed = timer.elapsed();

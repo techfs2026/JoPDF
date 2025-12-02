@@ -67,11 +67,6 @@ public:
      */
     void cancelAllTasks();
 
-    /**
-     * @brief 等待所有任务完成
-     */
-    void waitForCompletion();
-
     // ========== 管理 ==========
     void clear();
     QString getStatistics() const;
@@ -126,8 +121,8 @@ private:
 
     // 批次管理（仅中文档使用）
     QVector<QVector<int>> m_backgroundBatches;
-    int m_currentBatchIndex;
-    QTimer* m_batchTimer;
+    int m_nextBatchIndex = 0;
+    int m_runningTasks = 0;
 
     // 任务跟踪（仅中文档使用）
     QMutex m_taskMutex;

@@ -13,18 +13,14 @@ ThumbnailManagerV2::ThumbnailManagerV2(PerThreadMuPDFRenderer* renderer, QObject
     , m_threadPool(std::make_unique<QThreadPool>())
     , m_thumbnailWidth(180)  // 提高默认宽度：120 → 180
     , m_rotation(0)
-    , m_currentBatchIndex(0)
+    , m_nextBatchIndex(0)
+    , m_runningTasks(0)
     , m_isLoadingInProgress(false)
     , m_devicePixelRatio(1.0)
 {
     int threadCount = qMax(4, QThread::idealThreadCount() / 3);
     m_threadPool->setMaxThreadCount(threadCount);
     m_threadPool->setExpiryTimeout(30000);
-
-    m_batchTimer = new QTimer(this);
-    m_batchTimer->setSingleShot(true);
-    m_batchTimer->setInterval(200);
-    connect(m_batchTimer, &QTimer::timeout, this, &ThumbnailManagerV2::processNextBatch);
 
     // 检测设备像素比
     detectDevicePixelRatio();
@@ -41,8 +37,6 @@ ThumbnailManagerV2::~ThumbnailManagerV2()
     clear();
 }
 
-// ========== 配置 ==========
-
 void ThumbnailManagerV2::setThumbnailWidth(int width)
 {
     if (width >= 80 && width <= 400) {
@@ -56,8 +50,6 @@ void ThumbnailManagerV2::setRotation(int rotation)
 {
     m_rotation = rotation;
 }
-
-// ========== 获取缩略图 ==========
 
 QImage ThumbnailManagerV2::getThumbnail(int pageIndex) const
 {
@@ -78,10 +70,8 @@ bool ThumbnailManagerV2::hasThumbnail(int pageIndex) const
 
 int ThumbnailManagerV2::cachedCount() const
 {
-    return m_cache ? m_cache->count() : 0;
+    return m_cache->count();
 }
-
-// ========== 加载控制 ==========
 
 void ThumbnailManagerV2::startLoading(const QSet<int>& initialVisible)
 {
@@ -200,8 +190,8 @@ void ThumbnailManagerV2::cancelAllTasks()
 {
     QMutexLocker locker(&m_taskMutex);
 
-    m_batchTimer->stop();
-    m_currentBatchIndex = 0;
+    m_nextBatchIndex = 0;
+    m_runningTasks = 0;
 
     // 等待所有任务完成（自动删除）
     if (m_threadPool) {
@@ -210,32 +200,23 @@ void ThumbnailManagerV2::cancelAllTasks()
     }
 }
 
-void ThumbnailManagerV2::waitForCompletion()
-{
-    m_threadPool->waitForDone();
-}
-
 void ThumbnailManagerV2::clear()
 {
     cancelAllTasks();
-    waitForCompletion();
 
     if (m_cache) {
         m_cache->clear();
     }
 
     m_backgroundBatches.clear();
-    m_currentBatchIndex = 0;
+    m_nextBatchIndex = 0;
+    m_runningTasks = 0;
     m_isLoadingInProgress = false;
 }
 
 QString ThumbnailManagerV2::getStatistics() const
 {
-    QString stats = m_cache ? m_cache->getStatistics() : QString();
-    stats += QString("\nDevice Pixel Ratio: %1x").arg(m_devicePixelRatio);
-    stats += QString("\nDisplay Width: %1px").arg(m_thumbnailWidth);
-    stats += QString("\nRender Width: %1px").arg(getRenderWidth());
-    return stats;
+    return m_cache->getStatistics();
 }
 
 bool ThumbnailManagerV2::shouldRespondToScroll() const
@@ -243,7 +224,6 @@ bool ThumbnailManagerV2::shouldRespondToScroll() const
     return !m_isLoadingInProgress;
 }
 
-// ========== 私有方法 ==========
 
 void ThumbnailManagerV2::detectDevicePixelRatio()
 {
@@ -259,7 +239,7 @@ void ThumbnailManagerV2::detectDevicePixelRatio()
             m_devicePixelRatio = 3.0;
         }
     } else {
-        m_devicePixelRatio = 1.6;
+        m_devicePixelRatio = 1.2;
     }
 }
 
@@ -345,55 +325,61 @@ void ThumbnailManagerV2::renderPagesAsync(const QVector<int>& pages, RenderPrior
         priority,
         getRenderWidth(),  // 使用高DPI渲染宽度
         m_rotation,
-        m_devicePixelRatio  // 传递设备像素比
-        );
+        m_devicePixelRatio,  // 传递设备像素比
+        nullptr);
 
     m_threadPool->start(task, static_cast<int>(priority));
 }
 
 void ThumbnailManagerV2::setupBackgroundBatches()
 {
-    if (!m_strategy) {
-        return;
-    }
-
     m_backgroundBatches = m_strategy->getBackgroundBatches();
-    m_currentBatchIndex = 0;
+    m_nextBatchIndex = 0;
+    m_runningTasks = 0;
 
-    if (!m_backgroundBatches.isEmpty()) {
-        qInfo() << "ThumbnailManagerV2: Setup" << m_backgroundBatches.size()
-        << "background batches for medium document";
+    int maxConcurrency = m_threadPool->maxThreadCount();
 
-        QTimer::singleShot(500, this, &ThumbnailManagerV2::processNextBatch);
+    // 启动前 maxConcurrency 个批次
+    for (int i = 0; i < maxConcurrency; i++) {
+        processNextBatch();
     }
 }
 
 void ThumbnailManagerV2::processNextBatch()
 {
-    if (m_currentBatchIndex >= m_backgroundBatches.size()) {
-        qInfo() << "ThumbnailManagerV2: All background batches completed";
-
-        m_isLoadingInProgress = false;
-
-        emit loadingStatusChanged(tr("加载完毕"));
-        emit allCompleted();
+    if (m_nextBatchIndex >= m_backgroundBatches.size()) {
+        // 没有更多批次了，如果也没有任务在跑 → 全部完成
+        if (m_runningTasks == 0) {
+            emit allCompleted();
+        }
         return;
     }
 
-    const QVector<int>& batch = m_backgroundBatches[m_currentBatchIndex];
+    const QVector<int>& batch = m_backgroundBatches[m_nextBatchIndex];
 
-    emit loadingStatusChanged(tr("加载中..."));
+    m_runningTasks++;
 
-    renderPagesAsync(batch, RenderPriority::LOW);
+    auto callback = [this]() {
+        QMetaObject::invokeMethod(this, [this]() {
+            emit batchCompleted(m_nextBatchIndex, m_backgroundBatches.size());
+            m_runningTasks--;
+            processNextBatch(); // 启动下一个
+        });
+    };
 
-    emit batchCompleted(m_currentBatchIndex + 1, m_backgroundBatches.size());
+    m_nextBatchIndex++;
 
-    m_currentBatchIndex++;
+    auto* task = new ThumbnailBatchTask(
+        m_renderer->documentPath(),
+        m_cache.get(),
+        this,
+        batch,
+        RenderPriority::LOW,
+        getRenderWidth(),
+        m_rotation,
+        m_devicePixelRatio,
+        callback
+        );
 
-    if (m_currentBatchIndex < m_backgroundBatches.size()) {
-        m_batchTimer->start();
-    } else {
-        m_isLoadingInProgress = false;
-        emit allCompleted();
-    }
+    m_threadPool->start(task);
 }
