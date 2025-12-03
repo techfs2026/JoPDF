@@ -20,6 +20,7 @@ PDFPageWidget::PDFPageWidget(PDFDocumentSession* session, QWidget* parent)
     , m_renderer(nullptr)
     , m_cacheManager(nullptr)
     , m_isTextSelecting(false)
+    , m_ocrHoverEnabled(false)
 {
     if (!m_session) {
         qCritical() << "PDFPageWidget: session is null!";
@@ -32,13 +33,14 @@ PDFPageWidget::PDFPageWidget(PDFDocumentSession* session, QWidget* parent)
 
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
+
+    setupOCRHover();
 }
 
 PDFPageWidget::~PDFPageWidget()
 {
 }
 
-// ==================== 被动更新方法 ====================
 
 void PDFPageWidget::setDisplayImages(const QImage& primaryImage, const QImage& secondaryImage)
 {
@@ -71,7 +73,6 @@ void PDFPageWidget::clearHighlights()
     update();
 }
 
-// ==================== 工具方法 ====================
 
 QPointF PDFPageWidget::screenToPageCoord(const QPoint& screenPos, int pageX, int pageY) const
 {
@@ -178,7 +179,6 @@ QString PDFPageWidget::getCacheStatistics() const
     return m_cacheManager->getStatistics();
 }
 
-// ==================== 尺寸计算 ====================
 
 QSize PDFPageWidget::sizeHint() const
 {
@@ -223,8 +223,6 @@ QSize PDFPageWidget::sizeHint() const
 
     return QSize(contentWidth + 2 * margin, contentHeight + 2 * margin);
 }
-
-// ==================== 绘制相关 ====================
 
 void PDFPageWidget::paintEvent(QPaintEvent* event)
 {
@@ -470,10 +468,26 @@ void PDFPageWidget::drawTextSelection(QPainter& painter, int pageIndex, int page
     painter.restore();
 }
 
-// ==================== 鼠标事件处理 ====================
-
 void PDFPageWidget::mouseMoveEvent(QMouseEvent* event)
 {
+    // 检查OCR悬停模式
+    if (m_ocrHoverEnabled) {
+        const PDFDocumentState* state = m_session->state();
+
+        // 只在扫描版PDF上启用
+        if (!state->isTextPDF()) {
+            m_lastHoverPos = event->pos();
+
+            // 重启悬停计时器
+            m_hoverTimer.stop();
+            m_hoverTimer.start();
+        }
+
+        // OCR模式下不执行其他鼠标移动逻辑
+        event->accept();
+        return;
+    }
+
     const PDFDocumentState* state = m_session->state();
 
     // 文本选择拖拽中
@@ -553,4 +567,123 @@ void PDFPageWidget::mouseReleaseEvent(QMouseEvent* event)
     }
 
     QWidget::mouseReleaseEvent(event);
+}
+
+
+void PDFPageWidget::setupOCRHover()
+{
+    // 配置悬停计时器
+    m_hoverTimer.setSingleShot(true);
+    m_hoverTimer.setInterval(AppConfig::instance().ocrDebounceDelay());
+
+    connect(&m_hoverTimer, &QTimer::timeout, this, [this]() {
+        if (!m_ocrHoverEnabled) return;
+
+        // 提取悬停区域的图像
+        QImage image = extractHoverRegion(m_lastHoverPos);
+        if (!image.isNull()) {
+            QRect regionRect = calculateHoverRect(m_lastHoverPos);
+
+            // 转换为全局坐标
+            QRect globalRect = regionRect.translated(mapToGlobal(QPoint(0, 0)));
+
+            emit ocrHoverTriggered(image, globalRect);
+        }
+    });
+}
+
+void PDFPageWidget::setOCRHoverEnabled(bool enabled)
+{
+    m_ocrHoverEnabled = enabled;
+
+    if (!enabled) {
+        m_hoverTimer.stop();
+    }
+
+    // 修改光标样式
+    if (enabled) {
+        setCursor(Qt::CrossCursor);
+    } else {
+        const PDFDocumentState* state = m_session->state();
+        if (state->isTextPDF()) {
+            setCursor(Qt::IBeamCursor);
+        } else {
+            setCursor(Qt::ArrowCursor);
+        }
+    }
+}
+
+QImage PDFPageWidget::extractHoverRegion(const QPoint& pos)
+{
+    /*
+     * 提取鼠标周围的图像区域
+     *
+     * 步骤：
+     * 1. 确定鼠标在哪个页面上
+     * 2. 计算悬停矩形区域
+     * 3. 从缓存或渲染器获取页面图像
+     * 4. 裁剪出目标区域
+     */
+
+    const PDFDocumentState* state = m_session->state();
+    if (!state->isDocumentLoaded()) {
+        return QImage();
+    }
+
+    // 1. 获取鼠标所在的页面
+    int pageX, pageY;
+    int pageIndex = getPageAtPos(pos, &pageX, &pageY);
+
+    if (pageIndex < 0) {
+        return QImage();
+    }
+
+    // 2. 计算悬停矩形（Widget坐标系）
+    QRect hoverRect = calculateHoverRect(pos);
+
+    // 3. 获取页面图像
+    double zoom = state->currentZoom();
+    int rotation = state->currentRotation();
+
+    QImage pageImage = m_cacheManager->getPage(pageIndex, zoom, rotation);
+
+    if (pageImage.isNull()) {
+        // 缓存未命中，临时渲染
+        auto result = m_renderer->renderPage(pageIndex, zoom, rotation);
+        if (!result.success) {
+            return QImage();
+        }
+        pageImage = result.image;
+    }
+
+    // 4. 转换为图像坐标并裁剪
+    QRect imageRect = hoverRect.translated(-pageX, -pageY);
+    imageRect = imageRect.intersected(pageImage.rect());
+
+    if (imageRect.isEmpty()) {
+        return QImage();
+    }
+
+    return pageImage.copy(imageRect);
+}
+
+QRect PDFPageWidget::calculateHoverRect(const QPoint& centerPos)
+{
+    int baseSize = AppConfig::instance().ocrHoverRegionSize();
+
+
+    int actualSize = baseSize;
+
+    // 以鼠标为中心的矩形
+    QRect rect(
+        centerPos.x() - actualSize / 2,
+        centerPos.y() - actualSize / 2,
+        actualSize,
+        actualSize
+        );
+
+    // 限制在widget范围内
+    rect = rect.intersected(this->rect());
+
+    return rect;
 }

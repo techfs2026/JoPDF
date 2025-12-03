@@ -99,21 +99,70 @@ bool OCREngine::initializeInternal(const QString& modelDir)
 
         // 4. 配置会话选项
         Ort::SessionOptions sessionOptions;
-        sessionOptions.SetIntraOpNumThreads(4);  // 使用4个线程
+        sessionOptions.SetIntraOpNumThreads(4);
         sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
-        // 5. 加载三个模型
+        // 5. 加载检测模型并获取输入输出名称
         qInfo() << "OCREngine: Loading detection model...";
         std::wstring detPath = detModel.toStdWString();
         m_detSession = std::make_unique<Ort::Session>(*m_env, detPath.c_str(), sessionOptions);
 
+        // ===== 获取检测模型的输入输出名称 =====
+        Ort::AllocatorWithDefaultOptions allocator;
+
+        // 输入名称
+        size_t numInputs = m_detSession->GetInputCount();
+        for (size_t i = 0; i < numInputs; i++) {
+            auto inputName = m_detSession->GetInputNameAllocated(i, allocator);
+            m_detInputNames.push_back(inputName.get());
+            qInfo() << "  Detection input" << i << ":" << inputName.get();
+        }
+
+        // 输出名称
+        size_t numOutputs = m_detSession->GetOutputCount();
+        for (size_t i = 0; i < numOutputs; i++) {
+            auto outputName = m_detSession->GetOutputNameAllocated(i, allocator);
+            m_detOutputNames.push_back(outputName.get());
+            qInfo() << "  Detection output" << i << ":" << outputName.get();
+        }
+
+        // 6. 加载分类模型并获取输入输出名称
         qInfo() << "OCREngine: Loading classification model...";
         std::wstring clsPath = clsModel.toStdWString();
         m_clsSession = std::make_unique<Ort::Session>(*m_env, clsPath.c_str(), sessionOptions);
 
+        numInputs = m_clsSession->GetInputCount();
+        for (size_t i = 0; i < numInputs; i++) {
+            auto inputName = m_clsSession->GetInputNameAllocated(i, allocator);
+            m_clsInputNames.push_back(inputName.get());
+            qInfo() << "  Classification input" << i << ":" << inputName.get();
+        }
+
+        numOutputs = m_clsSession->GetOutputCount();
+        for (size_t i = 0; i < numOutputs; i++) {
+            auto outputName = m_clsSession->GetOutputNameAllocated(i, allocator);
+            m_clsOutputNames.push_back(outputName.get());
+            qInfo() << "  Classification output" << i << ":" << outputName.get();
+        }
+
+        // 7. 加载识别模型并获取输入输出名称
         qInfo() << "OCREngine: Loading recognition model...";
         std::wstring recPath = recModel.toStdWString();
         m_recSession = std::make_unique<Ort::Session>(*m_env, recPath.c_str(), sessionOptions);
+
+        numInputs = m_recSession->GetInputCount();
+        for (size_t i = 0; i < numInputs; i++) {
+            auto inputName = m_recSession->GetInputNameAllocated(i, allocator);
+            m_recInputNames.push_back(inputName.get());
+            qInfo() << "  Recognition input" << i << ":" << inputName.get();
+        }
+
+        numOutputs = m_recSession->GetOutputCount();
+        for (size_t i = 0; i < numOutputs; i++) {
+            auto outputName = m_recSession->GetOutputNameAllocated(i, allocator);
+            m_recOutputNames.push_back(outputName.get());
+            qInfo() << "  Recognition output" << i << ":" << outputName.get();
+        }
 
         qInfo() << "OCREngine: Initialization successful";
         qInfo() << "  Character set size:" << m_characterSet.size();
@@ -221,13 +270,6 @@ OCRResult OCREngine::recognize(const QImage& image)
 
 QVector<QVector<QPointF>> OCREngine::detectTextRegions(const QImage& image)
 {
-    /*
-     * 检测流程：
-     * 1. 图像预处理：调整大小、归一化
-     * 2. ONNX推理：DBNet模型输出概率图
-     * 3. 后处理：二值化、轮廓检测、过滤
-     */
-
     // 预处理
     int resizedW, resizedH;
     std::vector<float> inputData = preprocessForDet(image, resizedW, resizedH);
@@ -240,14 +282,22 @@ QVector<QVector<QPointF>> OCREngine::detectTextRegions(const QImage& image)
         inputShape.data(), inputShape.size()
         );
 
-    // ONNX推理
-    const char* inputNames[] = {"x"};
-    const char* outputNames[] = {"sigmoid_0.tmp_0"};  // DBNet输出名
 
+    std::vector<const char*> inputNames;
+    for (const auto& name : m_detInputNames) {
+        inputNames.push_back(name.c_str());
+    }
+
+    std::vector<const char*> outputNames;
+    for (const auto& name : m_detOutputNames) {
+        outputNames.push_back(name.c_str());
+    }
+
+    // ONNX推理
     auto outputTensors = m_detSession->Run(
         Ort::RunOptions{nullptr},
-        inputNames, &inputTensor, 1,
-        outputNames, 1
+        inputNames.data(), &inputTensor, inputNames.size(),
+        outputNames.data(), outputNames.size()
         );
 
     // 后处理
@@ -382,13 +432,6 @@ QVector<QVector<QPointF>> OCREngine::postprocessDet(Ort::Value& tensor,
 
 int OCREngine::classifyOrientation(const QImage& image)
 {
-    /*
-     * 分类流程：
-     * 1. 预处理：缩放到192x48
-     * 2. ONNX推理：输出[0度, 180度]的概率
-     * 3. 后处理：选择概率最高的角度
-     */
-
     // 预处理
     std::vector<float> inputData = preprocessForCls(image);
 
@@ -400,17 +443,22 @@ int OCREngine::classifyOrientation(const QImage& image)
         inputShape.data(), inputShape.size()
         );
 
-    // ONNX推理
-    const char* inputNames[] = {"x"};
-    const char* outputNames[] = {"softmax_0.tmp_0"};
+    std::vector<const char*> inputNames;
+    for (const auto& name : m_clsInputNames) {
+        inputNames.push_back(name.c_str());
+    }
+
+    std::vector<const char*> outputNames;
+    for (const auto& name : m_clsOutputNames) {
+        outputNames.push_back(name.c_str());
+    }
 
     auto outputTensors = m_clsSession->Run(
         Ort::RunOptions{nullptr},
-        inputNames, &inputTensor, 1,
-        outputNames, 1
+        inputNames.data(), &inputTensor, inputNames.size(),
+        outputNames.data(), outputNames.size()
         );
 
-    // 后处理
     return postprocessCls(outputTensors[0]);
 }
 
@@ -467,16 +515,8 @@ int OCREngine::postprocessCls(Ort::Value& tensor)
 }
 
 
-
 QPair<QString, float> OCREngine::recognizeText(const QImage& image)
 {
-    /*
-     * 识别流程：
-     * 1. 预处理：高度固定48，宽度自适应
-     * 2. ONNX推理：输出每个时间步的字符概率
-     * 3. CTC解码：去除blank和重复，映射到字符
-     */
-
     // 预处理
     int resizedW;
     std::vector<float> inputData = preprocessForRec(image, resizedW);
@@ -489,17 +529,22 @@ QPair<QString, float> OCREngine::recognizeText(const QImage& image)
         inputShape.data(), inputShape.size()
         );
 
-    // ONNX推理
-    const char* inputNames[] = {"x"};
-    const char* outputNames[] = {"softmax_0.tmp_0"};
+    std::vector<const char*> inputNames;
+    for (const auto& name : m_recInputNames) {
+        inputNames.push_back(name.c_str());
+    }
+
+    std::vector<const char*> outputNames;
+    for (const auto& name : m_recOutputNames) {
+        outputNames.push_back(name.c_str());
+    }
 
     auto outputTensors = m_recSession->Run(
         Ort::RunOptions{nullptr},
-        inputNames, &inputTensor, 1,
-        outputNames, 1
+        inputNames.data(), &inputTensor, inputNames.size(),
+        outputNames.data(), outputNames.size()
         );
 
-    // 后处理
     return postprocessRec(outputTensors[0]);
 }
 

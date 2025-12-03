@@ -4,12 +4,15 @@
 #include "pdfpagewidget.h"
 #include "navigationpanel.h"
 #include "searchwidget.h"
+#include "ocrfloatingwidget.h"
 #include "perthreadmupdfrenderer.h"
 #include "pagecachemanager.h"
 #include "pdfinteractionhandler.h"
 #include "textcachemanager.h"
 #include "pdfviewhandler.h"
 #include "linkmanager.h"
+#include "ocrmanager.h"
+#include "dictionaryconnector.h"
 #include "appconfig.h"
 
 #include <QVBoxLayout>
@@ -37,6 +40,8 @@ PDFDocumentTab::PDFDocumentTab(QWidget* parent)
     , m_lastClickTime(0)
     , m_clickCount(0)
     , m_isUserScrolling(false)
+    , m_ocrFloatingWidget(nullptr)
+    , m_ocrHoverEnabled(false)
 {
     setupUI();
     setupConnections();
@@ -45,8 +50,6 @@ PDFDocumentTab::PDFDocumentTab(QWidget* parent)
 PDFDocumentTab::~PDFDocumentTab()
 {
 }
-
-// ==================== UI设置 ====================
 
 void PDFDocumentTab::setupUI()
 {
@@ -101,6 +104,10 @@ void PDFDocumentTab::setupUI()
     progressLayout->addStretch();
     progressLayout->setContentsMargins(0, 8, 0, 8);
     mainLayout->addLayout(progressLayout);
+
+    // 创建OCR浮层
+    m_ocrFloatingWidget = new OCRFloatingWidget(this);
+    m_ocrFloatingWidget->hide();
 
     // 应用样式
     applyModernStyle();
@@ -235,9 +242,24 @@ void PDFDocumentTab::setupConnections()
 
     connect(m_session, &PDFDocumentSession::paperEffectChanged,
             this, &PDFDocumentTab::paperEffectChanged);
+
+
+    // PageWidget的OCR悬停信号
+    connect(m_pageWidget, &PDFPageWidget::ocrHoverTriggered,
+            this, &PDFDocumentTab::onOCRHoverTriggered);
+
+    // OCRManager的信号（全局单例）
+    connect(&OCRManager::instance(), &OCRManager::ocrCompleted,
+            this, &PDFDocumentTab::onOCRCompleted);
+
+    connect(&OCRManager::instance(), &OCRManager::ocrFailed,
+            this, &PDFDocumentTab::onOCRFailed);
+
+    // 浮层的查词信号
+    connect(m_ocrFloatingWidget, &OCRFloatingWidget::lookupRequested,
+            this, &PDFDocumentTab::onLookupRequested);
 }
 
-// ==================== 文档操作 ====================
 
 bool PDFDocumentTab::loadDocument(const QString& filePath, QString* errorMessage)
 {
@@ -270,7 +292,6 @@ QString PDFDocumentTab::documentTitle() const
     return QFileInfo(documentPath()).fileName();
 }
 
-// ==================== 导航操作 ====================
 
 void PDFDocumentTab::previousPage()
 {
@@ -297,7 +318,6 @@ void PDFDocumentTab::goToPage(int pageIndex)
     m_session->goToPage(pageIndex);
 }
 
-// ==================== 缩放操作 ====================
 
 void PDFDocumentTab::zoomIn()
 {
@@ -331,7 +351,6 @@ void PDFDocumentTab::setZoom(double zoom)
     m_session->setZoom(zoom);
 }
 
-// ==================== 视图操作 ====================
 
 void PDFDocumentTab::setDisplayMode(PageDisplayMode mode)
 {
@@ -345,7 +364,7 @@ void PDFDocumentTab::setContinuousScroll(bool continuous)
     m_session->setContinuousScroll(continuous);
 }
 
-// ==================== 搜索操作 ====================
+
 
 void PDFDocumentTab::showSearchBar()
 {
@@ -387,7 +406,6 @@ bool PDFDocumentTab::isSearchBarVisible() const
     return m_searchWidget && m_searchWidget->isVisible();
 }
 
-// ==================== 文本操作 ====================
 
 void PDFDocumentTab::copySelectedText()
 {
@@ -403,7 +421,6 @@ void PDFDocumentTab::selectAll()
     }
 }
 
-// ==================== 链接操作 ====================
 
 void PDFDocumentTab::setLinksVisible(bool visible)
 {
@@ -416,7 +433,6 @@ bool PDFDocumentTab::linksVisible() const
     return m_session->state()->linksVisible();
 }
 
-// ==================== 状态查询 ====================
 
 int PDFDocumentTab::currentPage() const
 {
@@ -494,8 +510,6 @@ void PDFDocumentTab::findPrevious()
         }
     }
 }
-
-// ==================== Session状态变化响应 ====================
 
 void PDFDocumentTab::onDocumentLoaded(const QString& filePath, int pageCount)
 {
@@ -629,8 +643,6 @@ void PDFDocumentTab::onSearchCompleted(const QString& query, int totalMatches)
     emit searchCompleted(query, totalMatches);
 }
 
-// ==================== PageWidget用户交互响应 ====================
-
 void PDFDocumentTab::onPageClicked(int pageIndex, const QPointF& pagePos, Qt::MouseButton button, Qt::KeyboardModifiers modifiers)
 {
     if (button != Qt::LeftButton) return;
@@ -732,7 +744,6 @@ void PDFDocumentTab::onScrollValueChanged(int value)
     }
 }
 
-// ==================== 渲染协调 ====================
 
 void PDFDocumentTab::renderAndUpdatePages()
 {
@@ -832,8 +843,6 @@ void PDFDocumentTab::refreshVisiblePages()
         m_pageWidget->update();
     }
 }
-
-// ==================== 辅助方法 ====================
 
 void PDFDocumentTab::updateScrollBarPolicy()
 {
@@ -950,3 +959,89 @@ bool PDFDocumentTab::paperEffectEnabled() const
 {
     return m_session ? m_session->paperEffectEnabled() : false;
 }
+
+void PDFDocumentTab::setOCRHoverEnabled(bool enabled)
+{
+    if (!isDocumentLoaded()) {
+        qWarning() << "Cannot enable OCR: No document loaded";
+        return;
+    }
+
+    // 只对扫描版PDF启用
+    if (enabled && isTextPDF()) {
+        QMessageBox::information(this, tr("功能不可用"),
+                                 tr("OCR悬停取词仅适用于扫描版PDF。\n"
+                                    "当前文档是原生文本PDF，请直接选择文字。"));
+        return;
+    }
+
+    m_ocrHoverEnabled = enabled;
+
+    // 通知PageWidget
+    if (m_pageWidget) {
+        m_pageWidget->setOCRHoverEnabled(enabled);
+    }
+
+    // 禁用时隐藏浮层
+    if (!enabled && m_ocrFloatingWidget) {
+        m_ocrFloatingWidget->hideFloating();
+    }
+}
+
+void PDFDocumentTab::onOCRHoverTriggered(const QImage& image, const QRect& regionRect)
+{
+    if (!m_ocrHoverEnabled) {
+        return;
+    }
+
+    // 检查OCR是否就绪
+    if (!OCRManager::instance().isReady()) {
+        qWarning() << "OCR not ready";
+        return;
+    }
+
+    m_lastOCRImage = image;
+    m_lastOCRRegion = regionRect;
+
+    // 请求OCR识别
+    OCRManager::instance().requestOCR(image, regionRect);
+}
+
+void PDFDocumentTab::onOCRCompleted(const OCRResult& result, const QRect& regionRect)
+{
+    if (!m_ocrHoverEnabled) {
+        return;
+    }
+
+    if (!result.success || result.text.isEmpty()) {
+        qDebug() << "OCR result empty";
+        return;
+    }
+
+    if (m_ocrFloatingWidget) {
+        m_ocrFloatingWidget->showResult(result.text, result.confidence, regionRect, m_lastOCRImage);
+    }
+}
+
+void PDFDocumentTab::onOCRFailed(const QString& error)
+{
+    if (!m_ocrHoverEnabled) {
+        return;
+    }
+
+    qWarning() << "OCR failed:" << error;
+    // 可选：显示错误提示
+    // QToolTip::showText(QCursor::pos(), tr("识别失败: %1").arg(error));
+}
+
+void PDFDocumentTab::onLookupRequested(const QString& text)
+{
+    // 调用词典（全局单例）
+    DictionaryConnector::instance().lookup(text);
+
+    // 隐藏浮层
+    if (m_ocrFloatingWidget) {
+        m_ocrFloatingWidget->hideFloating();
+    }
+}
+

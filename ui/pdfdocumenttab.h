@@ -13,6 +13,7 @@ class SearchWidget;
 class QScrollArea;
 class QSplitter;
 class QProgressBar;
+class OCRFloatingWidget;
 
 /**
  * @brief PDF文档标签页 - UI协调层
@@ -32,23 +33,18 @@ public:
     explicit PDFDocumentTab(QWidget* parent = nullptr);
     ~PDFDocumentTab();
 
-    // ==================== 文档操作 ====================
-
     bool loadDocument(const QString& filePath, QString* errorMessage = nullptr);
     void closeDocument();
     bool isDocumentLoaded() const;
     QString documentPath() const;
     QString documentTitle() const;
 
-    // ==================== 导航操作（委托给Session） ====================
 
     void previousPage();
     void nextPage();
     void firstPage();
     void lastPage();
     void goToPage(int pageIndex);
-
-    // ==================== 缩放操作 ====================
 
     void zoomIn();
     void zoomOut();
@@ -57,28 +53,21 @@ public:
     void fitWidth();
     void setZoom(double zoom);
 
-    // ==================== 视图操作 ====================
-
     void setDisplayMode(PageDisplayMode mode);
     void setContinuousScroll(bool continuous);
-
-    // ==================== 搜索操作 ====================
 
     void showSearchBar();
     void hideSearchBar();
     bool isSearchBarVisible() const;
 
-    // ==================== 文本操作 ====================
 
     void copySelectedText();
     void selectAll();
 
-    // ==================== 链接操作 ====================
 
     void setLinksVisible(bool visible);
     bool linksVisible() const;
 
-    // ==================== 状态查询 ====================
 
     int currentPage() const;
     int pageCount() const;
@@ -124,6 +113,10 @@ public:
     void setPaperEffectEnabled(bool enabled);
     bool paperEffectEnabled() const;
 
+    // OCR
+    void setOCRHoverEnabled(bool enabled);
+    bool isOCRHoverEnabled() const { return m_ocrHoverEnabled; }
+
 signals:
 
     void documentLoaded(const QString& filePath, int pageCount);
@@ -158,6 +151,11 @@ private slots:
     void onVisibleAreaChanged();
 
     void onScrollValueChanged(int value);
+
+    void onOCRHoverTriggered(const QImage& image, const QRect& regionRect);
+    void onOCRCompleted(const OCRResult& result, const QRect& regionRect);
+    void onOCRFailed(const QString& error);
+    void onLookupRequested(const QString& text);
 
 private:
 
@@ -202,6 +200,11 @@ private:
 
     // 添加标志位：标记是否是用户主动滚动触发的页面变化
     bool m_isUserScrolling;
+
+    OCRFloatingWidget* m_ocrFloatingWidget;  // OCR浮层
+    bool m_ocrHoverEnabled;
+    QImage m_lastOCRImage;
+    QRect m_lastOCRRegion;
 };
 
 #endif // PDFDOCUMENTTAB_H

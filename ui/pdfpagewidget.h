@@ -5,6 +5,7 @@
 #include <QImage>
 #include <QPoint>
 #include <QRect>
+#include <QTimer>
 
 class PDFDocumentSession;
 class PerThreadMuPDFRenderer;
@@ -33,8 +34,6 @@ public:
     explicit PDFPageWidget(PDFDocumentSession* session, QWidget* parent = nullptr);
     ~PDFPageWidget();
 
-    // ==================== 被动更新方法（由Tab调用） ====================
-
     /**
      * @brief 设置要渲染的图像（由Tab提供已渲染的图像）
      */
@@ -54,8 +53,6 @@ public:
      * @brief 清除所有高亮（选择、搜索等）
      */
     void clearHighlights();
-
-    // ==================== 工具方法 ====================
 
     /**
      * @brief 屏幕坐标转页面坐标
@@ -78,14 +75,16 @@ public:
      */
     QSize getViewportSize() const;
 
-    // ==================== 查询方法 ====================
-
     QString getCacheStatistics() const;
 
     QSize calculateRequiredSize() const;
 
+    /**
+     * @brief 设置OCR悬停模式
+     */
+    void setOCRHoverEnabled(bool enabled);
+
 signals:
-    // ==================== 用户交互信号（发给Tab处理） ====================
 
     /**
      * @brief 页面被点击
@@ -126,8 +125,14 @@ signals:
      */
     void visibleAreaChanged();
 
+    /**
+     * @brief 鼠标悬停触发OCR（新增信号）
+     * @param image 提取的图像区域
+     * @param regionRect 区域位置（Widget坐标系）
+     */
+    void ocrHoverTriggered(const QImage& image, const QRect& regionRect);
+
 protected:
-    // ==================== 事件处理 ====================
 
     void paintEvent(QPaintEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
@@ -137,7 +142,6 @@ protected:
     QSize sizeHint() const override;
 
 private:
-    // ==================== 绘制辅助方法 ====================
 
     void paintSinglePageMode(QPainter& painter);
     void paintDoublePageMode(QPainter& painter);
@@ -153,6 +157,11 @@ private:
     void drawTextSelection(QPainter& painter, int pageIndex, int pageX, int pageY, double zoom);
 
 private:
+    void setupOCRHover();
+    QImage extractHoverRegion(const QPoint& pos);
+    QRect calculateHoverRect(const QPoint& pos);
+
+
     // 核心引用（不拥有所有权）
     PDFDocumentSession* m_session;
     PerThreadMuPDFRenderer* m_renderer;
@@ -165,6 +174,11 @@ private:
     // 交互状态
     bool m_isTextSelecting;  // 是否正在进行文本选择拖拽
     QPoint m_dragStartPos;   // 拖拽起始位置
+
+    // OCR相关
+    bool m_ocrHoverEnabled;
+    QPoint m_lastHoverPos;
+    QTimer m_hoverTimer;  // 悬停计时器
 };
 
 #endif // PDFPAGEWIDGET_H

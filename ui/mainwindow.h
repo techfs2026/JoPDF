@@ -13,6 +13,7 @@ class QComboBox;
 class QLabel;
 class QActionGroup;
 class PDFDocumentTab;
+class OCRStatusIndicator;
 
 class MainWindow : public QMainWindow
 {
@@ -76,10 +77,14 @@ private slots:
 
     void togglePaperEffect();
 
+    void toggleOCRHover();
+    void onOCREngineStateChanged(OCREngineState state);
+
 private:
     void createMenuBar();
     void createToolBar();
     void createStatusBar();
+    void createActions();
     void setupConnections();
 
     // 状态管理
@@ -100,6 +105,8 @@ private:
     void applyModernStyle();
 
 private:
+    void initializeOCRManager();
+
     // UI组件
     QTabWidget* m_tabWidget;
     QDockWidget* m_navigationDock;
@@ -142,15 +149,16 @@ private:
 
     // 工具栏Actions（用于状态同步）
     QAction* m_navPanelAction;
-    QAction* m_singlePageToolbarAction;
-    QAction* m_doublePageToolbarAction;
-    QAction* m_continuousScrollToolbarAction;
-    QAction* m_fitPageToolbarAction;
-    QAction* m_fitWidthToolbarAction;
+
     QAction* m_paperEffectAction;
 
     // 防抖定时器
     QTimer m_resizeDebounceTimer;
+
+    // OCR相关
+    QAction* m_ocrHoverAction;           // 工具栏的OCR按钮
+    OCRStatusIndicator* m_ocrIndicator;  // 状态栏的指示器
+    bool m_ocrInitialized;
 };
 
 #endif // MAINWINDOW_H

@@ -5,6 +5,7 @@
 #include <QString>
 #include <QColor>
 #include <QSize>
+#include <QCoreApplication>
 
 /**
  * @brief 应用配置管理类
@@ -147,6 +148,16 @@ public:
     bool lastNavigation() const;
     void setNavigation(bool enabled);
 
+    // OCR配置
+    QString ocrModelDir() const { return m_ocrModelDir; }
+    void setOcrModelDir(const QString& dir) { m_ocrModelDir = dir; }
+
+    int ocrDebounceDelay() const { return m_ocrDebounceDelay; }
+    void setOcrDebounceDelay(int delay) { m_ocrDebounceDelay = delay; }
+
+    int ocrHoverRegionSize() const { return m_ocrHoverRegionSize; }
+    void setOcrHoverRegionSize(int size) { m_ocrHoverRegionSize = size; }
+
     // ========== 调试配置 ==========
 
     /// 是否启用调试输出
@@ -167,6 +178,8 @@ public:
      * @brief 重置为默认配置
      */
     void resetToDefaults();
+
+
 
 private:
     AppConfig();
@@ -195,6 +208,11 @@ private:
     // 用户偏好
     bool m_rememberLastFile;
     bool m_debugMode;
+
+    // OCR设置
+    QString m_ocrModelDir = QCoreApplication::applicationDirPath() + "/ocr/models"; // 默认模型目录
+    int m_ocrDebounceDelay = 300;      // 防抖延迟（毫秒）
+    int m_ocrHoverRegionSize = 200;    // 悬停区域大小（像素）
 };
 
 #endif // APPCONFIG_H

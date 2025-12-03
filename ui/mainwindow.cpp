@@ -1,5 +1,8 @@
 #include "mainwindow.h"
 #include "pdfdocumenttab.h"
+#include "dictionaryconnector.h"
+#include "ocrstatusindicator.h"
+#include "ocrmanager.h"
 #include "appconfig.h"
 
 #include <QMenuBar>
@@ -28,6 +31,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_statusLabel(nullptr)
     , m_pageLabel(nullptr)
     , m_zoomLabel(nullptr)
+    , m_ocrInitialized(false)
 {
     setWindowTitle(tr("MuQt"));
     resize(AppConfig::instance().defaultWindowSize());
@@ -49,6 +53,7 @@ MainWindow::MainWindow(QWidget* parent)
     m_navigationDock->setVisible(false);
 
     // 创建UI组件
+    createActions();
     createMenuBar();
     createToolBar();
     createStatusBar();
@@ -63,6 +68,11 @@ MainWindow::MainWindow(QWidget* parent)
 
     // 应用全局样式
     applyModernStyle();
+
+    // 检查GoldenDict是否可用
+    if (!DictionaryConnector::instance().isGoldenDictAvailable()) {
+        qWarning() << "GoldenDict not found, lookup feature will not work";
+    }
 }
 
 MainWindow::~MainWindow()
@@ -73,7 +83,6 @@ MainWindow::~MainWindow()
     }
 }
 
-// ========== 文件操作 ==========
 
 void MainWindow::openFile()
 {
@@ -149,7 +158,6 @@ void MainWindow::quit()
     QApplication::quit();
 }
 
-// ========== 标签页管理 ==========
 
 PDFDocumentTab* MainWindow::currentTab() const
 {
@@ -230,17 +238,27 @@ void MainWindow::onTabChanged(int index)
         } else {
             m_paperEffectAction->setToolTip(tr("纸质书印刷效果增强"));
         }
+
+        bool isScannedPDF = !tab->isTextPDF();
+        bool ocrReady = (OCRManager::instance().engineState() == OCREngineState::Ready);
+
+        if (m_ocrHoverAction) {
+            m_ocrHoverAction->setEnabled(isScannedPDF && ocrReady);
+            m_ocrHoverAction->setChecked(tab->isOCRHoverEnabled());
+        }
     } else {
         // 无文档或无 tab,隐藏导航面板
         m_navigationDock->setWidget(nullptr);
         m_navigationDock->setVisible(false);
         m_showNavigationAction->setChecked(false);
         m_navPanelAction->setChecked(false);
+
+        if (m_ocrHoverAction) {
+            m_ocrHoverAction->setEnabled(false);
+            m_ocrHoverAction->setChecked(false);
+        }
     }
 
-    if (tab && tab->isDocumentLoaded()) {
-        m_paperEffectAction->setChecked(tab->paperEffectEnabled());
-    }
 
     updateUIState();
     updateWindowTitle();
@@ -287,7 +305,6 @@ void MainWindow::updateTabTitle(int index)
     }
 }
 
-// ========== 页面导航 ==========
 
 void MainWindow::previousPage()
 {
@@ -325,7 +342,6 @@ void MainWindow::goToPage(int page)
     }
 }
 
-// ========== 缩放操作 ==========
 
 void MainWindow::zoomIn()
 {
@@ -376,7 +392,6 @@ void MainWindow::onZoomComboChanged(const QString& text)
     }
 }
 
-// ========== 视图操作 ==========
 
 void MainWindow::togglePageMode(PageDisplayMode mode)
 {
@@ -430,7 +445,6 @@ void MainWindow::toggleLinksVisible()
     }
 }
 
-// ========== 搜索操作 ==========
 
 void MainWindow::showSearchBar()
 {
@@ -462,7 +476,6 @@ void MainWindow::copySelectedText()
     }
 }
 
-// ========== 事件响应 ==========
 
 void MainWindow::onCurrentTabPageChanged(int pageIndex)
 {
@@ -589,6 +602,26 @@ void MainWindow::onCurrentTabDocumentLoaded(const QString& filePath, int pageCou
         if (tab->isTextPDF()) {
             m_paperEffectAction->setChecked(false);
         }
+
+        // 更新OCR按钮状态
+        bool isScannedPDF = !tab->isTextPDF();
+        bool ocrReady = (OCRManager::instance().engineState() == OCREngineState::Ready);
+
+        if (m_ocrHoverAction) {
+            m_ocrHoverAction->setEnabled(isScannedPDF && ocrReady);
+
+            if (!isScannedPDF) {
+                m_ocrHoverAction->setToolTip(
+                    tr("OCR悬停取词\n(当前是文本PDF，不需要OCR)"));
+                m_ocrHoverAction->setChecked(false);
+            } else if (!ocrReady) {
+                m_ocrHoverAction->setToolTip(
+                    tr("OCR悬停取词\n(OCR引擎未就绪)"));
+            } else {
+                m_ocrHoverAction->setToolTip(
+                    tr("启用OCR悬停取词功能\n(仅扫描版PDF)"));
+            }
+        }
     }
     // 如果不是当前标签页,但该标签页的文档已加载
     // 不做任何操作,等待用户切换到该标签页时再更新导航面板
@@ -607,100 +640,192 @@ void MainWindow::onCurrentTabSearchCompleted(const QString& query, int totalMatc
     m_findPreviousAction->setEnabled(totalMatches > 0);
 }
 
-// ========== UI创建 ==========
-
-void MainWindow::createMenuBar()
+void MainWindow::createActions()
 {
-    // 隐藏菜单栏以获得更现代的外观
-    menuBar()->setNativeMenuBar(false);
 
-    // 文件菜单
-    QMenu* fileMenu = menuBar()->addMenu(tr("&文件"));
-
-    m_openAction = fileMenu->addAction(tr("&打开..."), this, &MainWindow::openFile);
+    m_openAction = new QAction(QIcon(":icons/resources/icons/open-file.png"),
+                               tr("打开"), this);
     m_openAction->setShortcut(QKeySequence::Open);
+    m_openAction->setToolTip(tr("打开文件 (Ctrl+O)"));
+    connect(m_openAction, &QAction::triggered, this, &MainWindow::openFile);
 
-    m_closeAction = fileMenu->addAction(tr("&关闭"), this, &MainWindow::closeCurrentTab);
+    m_closeAction = new QAction(tr("关闭"), this);
     m_closeAction->setShortcut(QKeySequence::Close);
+    connect(m_closeAction, &QAction::triggered, this, &MainWindow::closeCurrentTab);
 
-    fileMenu->addSeparator();
-
-    m_quitAction = fileMenu->addAction(tr("&退出"), this, &MainWindow::quit);
+    m_quitAction = new QAction(tr("退出"), this);
     m_quitAction->setShortcut(QKeySequence::Quit);
+    connect(m_quitAction, &QAction::triggered, this, &MainWindow::quit);
 
-    // 编辑菜单
-    QMenu* editMenu = menuBar()->addMenu(tr("&编辑"));
 
-    m_copyAction = editMenu->addAction(tr("&复制"), this, &MainWindow::copySelectedText);
+    m_copyAction = new QAction(tr("复制"), this);
     m_copyAction->setShortcut(QKeySequence::Copy);
     m_copyAction->setEnabled(false);
+    connect(m_copyAction, &QAction::triggered, this, &MainWindow::copySelectedText);
 
-    editMenu->addSeparator();
-
-    m_findAction = editMenu->addAction(tr("&查找..."), this, &MainWindow::showSearchBar);
+    m_findAction = new QAction(QIcon(":icons/resources/icons/search.png"),
+                               tr("查找"), this);
     m_findAction->setShortcut(QKeySequence::Find);
+    m_findAction->setToolTip(tr("搜索 (Ctrl+F)"));
+    connect(m_findAction, &QAction::triggered, this, &MainWindow::showSearchBar);
 
-    m_findNextAction = editMenu->addAction(tr("查找 &下一个"), this, &MainWindow::findNext);
+    m_findNextAction = new QAction(tr("查找下一个"), this);
     m_findNextAction->setShortcut(QKeySequence::FindNext);
     m_findNextAction->setEnabled(false);
+    connect(m_findNextAction, &QAction::triggered, this, &MainWindow::findNext);
 
-    m_findPreviousAction = editMenu->addAction(tr("查找 &上一个"),
-                                               this, &MainWindow::findPrevious);
+    m_findPreviousAction = new QAction(tr("查找上一个"), this);
     m_findPreviousAction->setShortcut(QKeySequence::FindPrevious);
     m_findPreviousAction->setEnabled(false);
+    connect(m_findPreviousAction, &QAction::triggered, this, &MainWindow::findPrevious);
 
-    // 视图菜单
-    QMenu* viewMenu = menuBar()->addMenu(tr("&视图"));
 
-    m_zoomInAction = viewMenu->addAction(tr("&缩小"), this, &MainWindow::zoomIn);
+    m_firstPageAction = new QAction(QIcon(":icons/resources/icons/first-arrow.png"),
+                                    tr("首页"), this);
+    m_firstPageAction->setToolTip(tr("首页 (Home)"));
+    connect(m_firstPageAction, &QAction::triggered, this, &MainWindow::firstPage);
+
+    m_previousPageAction = new QAction(QIcon(":icons/resources/icons/left-arrow.png"),
+                                       tr("上一页"), this);
+    m_previousPageAction->setToolTip(tr("上一页 (PgUp)"));
+    connect(m_previousPageAction, &QAction::triggered, this, &MainWindow::previousPage);
+
+    m_nextPageAction = new QAction(QIcon(":icons/resources/icons/right-arrow.png"),
+                                   tr("下一页"), this);
+    m_nextPageAction->setToolTip(tr("下一页 (PgDown)"));
+    connect(m_nextPageAction, &QAction::triggered, this, &MainWindow::nextPage);
+
+    m_lastPageAction = new QAction(QIcon(":icons/resources/icons/last-arrow.png"),
+                                   tr("尾页"), this);
+    m_lastPageAction->setToolTip(tr("尾页 (End)"));
+    connect(m_lastPageAction, &QAction::triggered, this, &MainWindow::lastPage);
+
+    m_zoomInAction = new QAction(QIcon(":icons/resources/icons/zoom-in.png"),
+                                 tr("放大"), this);
     m_zoomInAction->setShortcut(QKeySequence::ZoomIn);
+    m_zoomInAction->setToolTip(tr("放大 (Ctrl++)"));
+    connect(m_zoomInAction, &QAction::triggered, this, &MainWindow::zoomIn);
 
-    m_zoomOutAction = viewMenu->addAction(tr("&放大"), this, &MainWindow::zoomOut);
+    m_zoomOutAction = new QAction(QIcon(":icons/resources/icons/zoom-out.png"),
+                                  tr("缩小"), this);
     m_zoomOutAction->setShortcut(QKeySequence::ZoomOut);
+    m_zoomOutAction->setToolTip(tr("缩小 (Ctrl+-)"));
+    connect(m_zoomOutAction, &QAction::triggered, this, &MainWindow::zoomOut);
 
-    viewMenu->addSeparator();
-
-    m_fitPageAction = viewMenu->addAction(tr("&适应页面"), this, &MainWindow::fitPage);
+    m_fitPageAction = new QAction(QIcon(":icons/resources/icons/fit-to-page.png"),
+                                  tr("适应页面"), this);
     m_fitPageAction->setShortcut(tr("Ctrl+1"));
+    m_fitPageAction->setToolTip(tr("适应页面 (Ctrl+1)"));
     m_fitPageAction->setCheckable(true);
+    connect(m_fitPageAction, &QAction::triggered, this, &MainWindow::fitPage);
 
-    m_fitWidthAction = viewMenu->addAction(tr("&适应宽度"), this, &MainWindow::fitWidth);
+    m_fitWidthAction = new QAction(QIcon(":icons/resources/icons/fit-to-width.png"),
+                                   tr("适应宽度"), this);
     m_fitWidthAction->setShortcut(tr("Ctrl+2"));
+    m_fitWidthAction->setToolTip(tr("适应宽度 (Ctrl+2)"));
     m_fitWidthAction->setCheckable(true);
+    connect(m_fitWidthAction, &QAction::triggered, this, &MainWindow::fitWidth);
 
-    viewMenu->addSeparator();
 
     m_pageModeGroup = new QActionGroup(this);
     m_pageModeGroup->setExclusive(true);
 
-    m_singlePageAction = viewMenu->addAction(tr("&单页"), this, [this]() {
-        togglePageMode(PageDisplayMode::SinglePage);
-    });
+    m_singlePageAction = new QAction(QIcon(":icons/resources/icons/single-page-mode.png"),
+                                     tr("单页"), this);
     m_singlePageAction->setCheckable(true);
     m_singlePageAction->setChecked(true);
     m_pageModeGroup->addAction(m_singlePageAction);
-
-    m_doublePageAction = viewMenu->addAction(tr("&双页"), this, [this]() {
-        togglePageMode(PageDisplayMode::DoublePage);
+    connect(m_singlePageAction, &QAction::triggered, this, [this]() {
+        togglePageMode(PageDisplayMode::SinglePage);
     });
+
+    m_doublePageAction = new QAction(QIcon(":icons/resources/icons/double-page-mode.png"),
+                                     tr("双页"), this);
     m_doublePageAction->setCheckable(true);
     m_pageModeGroup->addAction(m_doublePageAction);
+    connect(m_doublePageAction, &QAction::triggered, this, [this]() {
+        togglePageMode(PageDisplayMode::DoublePage);
+    });
 
-    m_continuousScrollAction = viewMenu->addAction(tr("&连续滚动"),
-                                                   this, &MainWindow::toggleContinuousScroll);
+    m_continuousScrollAction = new QAction(QIcon(":icons/resources/icons/continuous-mode.png"),
+                                           tr("连续滚动"), this);
     m_continuousScrollAction->setCheckable(true);
+    m_continuousScrollAction->setChecked(true);
+    connect(m_continuousScrollAction, &QAction::triggered,
+            this, &MainWindow::toggleContinuousScroll);
 
-    viewMenu->addSeparator();
 
-    m_showNavigationAction = viewMenu->addAction(tr("&显示导航栏"),
-                                                 this, &MainWindow::toggleNavigationPanel);
-    m_showNavigationAction->setCheckable(true);
+    m_navPanelAction = new QAction(QIcon(":icons/resources/icons/sidebar.png"),
+                                   tr("导航面板"), this);
+    m_navPanelAction->setToolTip(tr("显示导航栏 (F9)"));
+    m_navPanelAction->setCheckable(true);
+    connect(m_navPanelAction, &QAction::triggered,
+            this, &MainWindow::toggleNavigationPanel);
+
+    m_showNavigationAction = m_navPanelAction;  // 菜单和工具栏共用同一个
     m_showNavigationAction->setShortcut(tr("F9"));
 
-    m_showLinksAction = viewMenu->addAction(tr("&显示链接边框"),
-                                            this, &MainWindow::toggleLinksVisible);
+    m_showLinksAction = new QAction(tr("显示链接边框"), this);
     m_showLinksAction->setCheckable(true);
     m_showLinksAction->setChecked(true);
+    connect(m_showLinksAction, &QAction::triggered,
+            this, &MainWindow::toggleLinksVisible);
+
+
+    m_paperEffectAction = new QAction(QIcon(":icons/resources/icons/paper-effect.png"),
+                                      tr("纸质增强"), this);
+    m_paperEffectAction->setToolTip(tr("魔法！护眼纸质感效果增强"));
+    m_paperEffectAction->setCheckable(true);
+    m_paperEffectAction->setChecked(false);
+    connect(m_paperEffectAction, &QAction::triggered,
+            this, &MainWindow::togglePaperEffect);
+
+    m_ocrHoverAction = new QAction(QIcon(":icons/resources/icons/ocr.png"),
+                                   tr("OCR悬停取词"), this);
+    m_ocrHoverAction->setShortcut(QKeySequence(tr("Ctrl+Shift+O")));
+    m_ocrHoverAction->setToolTip(tr("启用OCR悬停取词功能 (Ctrl+Shift+O)\n(仅扫描版PDF)"));
+    m_ocrHoverAction->setCheckable(true);
+    m_ocrHoverAction->setChecked(false);
+    m_ocrHoverAction->setEnabled(false);
+    connect(m_ocrHoverAction, &QAction::triggered,
+            this, &MainWindow::toggleOCRHover);
+}
+
+void MainWindow::createMenuBar()
+{
+    menuBar()->setNativeMenuBar(false);
+
+    // 文件菜单
+    QMenu* fileMenu = menuBar()->addMenu(tr("&文件"));
+    fileMenu->addAction(m_openAction);
+    fileMenu->addAction(m_closeAction);
+    fileMenu->addSeparator();
+    fileMenu->addAction(m_quitAction);
+
+    // 编辑菜单
+    QMenu* editMenu = menuBar()->addMenu(tr("&编辑"));
+    editMenu->addAction(m_copyAction);
+    editMenu->addSeparator();
+    editMenu->addAction(m_findAction);
+    editMenu->addAction(m_findNextAction);
+    editMenu->addAction(m_findPreviousAction);
+
+    // 视图菜单
+    QMenu* viewMenu = menuBar()->addMenu(tr("&视图"));
+    viewMenu->addAction(m_zoomInAction);
+    viewMenu->addAction(m_zoomOutAction);
+    viewMenu->addSeparator();
+    viewMenu->addAction(m_fitPageAction);
+    viewMenu->addAction(m_fitWidthAction);
+    viewMenu->addSeparator();
+    viewMenu->addAction(m_singlePageAction);
+    viewMenu->addAction(m_doublePageAction);
+    viewMenu->addAction(m_continuousScrollAction);
+    viewMenu->addSeparator();
+    viewMenu->addAction(m_showNavigationAction);
+    viewMenu->addAction(m_showLinksAction);
+    viewMenu->addSeparator();
+    viewMenu->addAction(m_ocrHoverAction);
 }
 
 void MainWindow::createToolBar()
@@ -710,34 +835,22 @@ void MainWindow::createToolBar()
     m_toolBar->setFloatable(false);
     m_toolBar->setIconSize(QSize(20, 20));
     m_toolBar->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    m_toolBar->setContentsMargins(0, 0, 0, 0);  // 移除外边距
+    m_toolBar->setContentsMargins(0, 0, 0, 0);
     m_toolBar->setObjectName("mainToolBar");
 
-    // ========== 导航面板按钮 ==========
-    m_navPanelAction = m_toolBar->addAction(QIcon(":icons/resources/icons/sidebar.png"), tr("导航面板"));
-    m_navPanelAction->setToolTip(tr("显示导航栏 (F9)"));
-    m_navPanelAction->setCheckable(true);
-    connect(m_navPanelAction, &QAction::triggered, this, &MainWindow::toggleNavigationPanel);
-
+    // 导航面板
+    m_toolBar->addAction(m_navPanelAction);
     m_toolBar->addSeparator();
 
-    // ========== 文件操作 ==========
-    QAction* openAction = m_toolBar->addAction(QIcon(":icons/resources/icons/open-file.png"), tr("打开"));
-    openAction->setToolTip(tr("打开文件 (Ctrl+O)"));
-    connect(openAction, &QAction::triggered, this, &MainWindow::openFile);
-
+    // 文件操作
+    m_toolBar->addAction(m_openAction);
     m_toolBar->addSeparator();
 
-    // ========== 页面导航 ==========
-    m_firstPageAction = m_toolBar->addAction(QIcon(":icons/resources/icons/first-arrow.png"), tr("首页"));
-    m_firstPageAction->setToolTip(tr("首页 (Home)"));
-    connect(m_firstPageAction, &QAction::triggered, this, &MainWindow::firstPage);
+    // 页面导航
+    m_toolBar->addAction(m_firstPageAction);
+    m_toolBar->addAction(m_previousPageAction);
 
-    m_previousPageAction = m_toolBar->addAction(QIcon(":icons/resources/icons/left-arrow.png"), tr("上一页"));
-    m_previousPageAction->setToolTip(tr("上一页 (PgUp)"));
-    connect(m_previousPageAction, &QAction::triggered, this, &MainWindow::previousPage);
-
-    // 页码输入 - 移除前面的空Label
+    // 页码输入框
     m_pageSpinBox = new QSpinBox(this);
     m_pageSpinBox->setMinimum(1);
     m_pageSpinBox->setMaximum(1);
@@ -749,20 +862,12 @@ void MainWindow::createToolBar()
             this, &MainWindow::goToPage);
     m_toolBar->addWidget(m_pageSpinBox);
 
-    m_nextPageAction = m_toolBar->addAction(QIcon(":icons/resources/icons/right-arrow.png"), tr("下一页"));
-    m_nextPageAction->setToolTip(tr("下一页 (PgDown)"));
-    connect(m_nextPageAction, &QAction::triggered, this, &MainWindow::nextPage);
-
-    m_lastPageAction = m_toolBar->addAction(QIcon(":icons/resources/icons/last-arrow.png"), tr("尾页"));
-    m_lastPageAction->setToolTip(tr("尾页 (End)"));
-    connect(m_lastPageAction, &QAction::triggered, this, &MainWindow::lastPage);
-
+    m_toolBar->addAction(m_nextPageAction);
+    m_toolBar->addAction(m_lastPageAction);
     m_toolBar->addSeparator();
 
-    // ========== 缩放控制 ==========
-    m_zoomOutAction = m_toolBar->addAction(QIcon(":icons/resources/icons/zoom-out.png"), tr("缩小"));
-    m_zoomOutAction->setToolTip(tr("缩小 (Ctrl+-)"));
-    connect(m_zoomOutAction, &QAction::triggered, this, &MainWindow::zoomOut);
+    // 缩放操作
+    m_toolBar->addAction(m_zoomOutAction);
 
     m_zoomComboBox = new QComboBox(this);
     m_zoomComboBox->setEditable(true);
@@ -775,83 +880,31 @@ void MainWindow::createToolBar()
             this, &MainWindow::onZoomComboChanged);
     m_toolBar->addWidget(m_zoomComboBox);
 
-    m_zoomInAction = m_toolBar->addAction(QIcon(":icons/resources/icons/zoom-in.png"), tr("放大"));
-    m_zoomInAction->setToolTip(tr("放大 (Ctrl++)"));
-    connect(m_zoomInAction, &QAction::triggered, this, &MainWindow::zoomIn);
-
+    m_toolBar->addAction(m_zoomInAction);
     m_toolBar->addSeparator();
 
-    // ========== 缩放模式（可检查） ==========
-    m_fitPageToolbarAction = m_toolBar->addAction(QIcon(":icons/resources/icons/fit-to-page.png"), tr("适应页面"));
-    m_fitPageToolbarAction->setToolTip(tr("适应页面 (Ctrl+1)"));
-    m_fitPageToolbarAction->setCheckable(true);
-    connect(m_fitPageToolbarAction, &QAction::triggered, this, &MainWindow::fitPage);
-
-    m_fitWidthToolbarAction = m_toolBar->addAction(QIcon(":icons/resources/icons/fit-to-width.png"), tr("适应宽度"));
-    m_fitWidthToolbarAction->setToolTip(tr("适应宽度 (Ctrl+2)"));
-    m_fitWidthToolbarAction->setCheckable(true);
-    connect(m_fitWidthToolbarAction, &QAction::triggered, this, &MainWindow::fitWidth);
-
+    // 缩放模式
+    m_toolBar->addAction(m_fitPageAction);
+    m_toolBar->addAction(m_fitWidthAction);
     m_toolBar->addSeparator();
 
-    // ========== 页面模式（互斥） ==========
-    QAction* singlePageToolbarAction = m_toolBar->addAction(QIcon(":icons/resources/icons/single-page-mode.png"), tr("单页"));
-    singlePageToolbarAction->setToolTip(tr("单页"));
-    singlePageToolbarAction->setCheckable(true);
-    singlePageToolbarAction->setChecked(true);
-    connect(singlePageToolbarAction, &QAction::triggered, this, [this]() {
-        togglePageMode(PageDisplayMode::SinglePage);
-    });
-
-    QAction* doublePageToolbarAction = m_toolBar->addAction(QIcon(":icons/resources/icons/double-page-mode.png"), tr("双页"));
-    doublePageToolbarAction->setToolTip(tr("双页"));
-    doublePageToolbarAction->setCheckable(true);
-    connect(doublePageToolbarAction, &QAction::triggered, this, [this]() {
-        togglePageMode(PageDisplayMode::DoublePage);
-    });
-
-    // 创建页面模式按钮组（工具栏）
-    QActionGroup* pageModeToolbarGroup = new QActionGroup(this);
-    pageModeToolbarGroup->setExclusive(true);
-    pageModeToolbarGroup->addAction(singlePageToolbarAction);
-    pageModeToolbarGroup->addAction(doublePageToolbarAction);
-
-    // 保存工具栏按钮引用以便状态同步
-    m_singlePageToolbarAction = singlePageToolbarAction;
-    m_doublePageToolbarAction = doublePageToolbarAction;
-
-    // ========== 连续滚动模式（独立可检查） ==========
-    QAction* continuousScrollToolbarAction = m_toolBar->addAction(QIcon(":icons/resources/icons/continuous-mode.png"), tr("连续滚动"));
-    continuousScrollToolbarAction->setToolTip(tr("连续滚动"));
-    continuousScrollToolbarAction->setCheckable(true);
-    continuousScrollToolbarAction->setChecked(true); // 默认启用
-    connect(continuousScrollToolbarAction, &QAction::triggered, this, &MainWindow::toggleContinuousScroll);
-
-    m_continuousScrollToolbarAction = continuousScrollToolbarAction;
-
+    // 页面模式
+    m_toolBar->addAction(m_singlePageAction);
+    m_toolBar->addAction(m_doublePageAction);
+    m_toolBar->addAction(m_continuousScrollAction);
     m_toolBar->addSeparator();
 
-    m_paperEffectAction = m_toolBar->addAction(
-        QIcon(":icons/resources/icons/paper-effect.png"),
-        tr("纸质增强")
-        );
-    m_paperEffectAction->setToolTip(tr("魔法！护眼纸质感效果增强"));
-    m_paperEffectAction->setCheckable(true);
-    m_paperEffectAction->setChecked(false);
-    connect(m_paperEffectAction, &QAction::triggered,
-            this, &MainWindow::togglePaperEffect);
+    // 特殊功能
+    m_toolBar->addAction(m_paperEffectAction);
+    m_toolBar->addAction(m_ocrHoverAction);
 
     // 弹性空间
     QWidget* spacer = new QWidget();
     spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_toolBar->addWidget(spacer);
 
-    // ========== 搜索按钮 ==========
-    QAction* searchAction = m_toolBar->addAction(QIcon(":icons/resources/icons/search.png"), tr("搜索"));
-    searchAction->setToolTip(tr("搜索 (Ctrl+F)"));
-    connect(searchAction, &QAction::triggered, this, &MainWindow::showSearchBar);
-
-
+    // 搜索
+    m_toolBar->addAction(m_findAction);
 }
 
 void MainWindow::createStatusBar()
@@ -874,6 +927,44 @@ void MainWindow::createStatusBar()
     m_zoomLabel->setMinimumWidth(100);
     m_zoomLabel->setAlignment(Qt::AlignCenter);
     statusBar()->addPermanentWidget(m_zoomLabel);
+
+    // 在右下角添加OCR状态指示器
+    m_ocrIndicator = new OCRStatusIndicator(this);
+    statusBar()->addPermanentWidget(m_ocrIndicator);
+
+    // 双击指示器可以查看详细信息
+    connect(m_ocrIndicator, &OCRStatusIndicator::doubleClicked,
+            this, [this]() {
+                QString message;
+                OCREngineState state = OCRManager::instance().engineState();
+
+                switch (state) {
+                case OCREngineState::Uninitialized:
+                    message = tr("OCR功能未初始化\n\n"
+                                 "首次使用时会自动加载模型，请稍候。");
+                    break;
+                case OCREngineState::Loading:
+                    message = tr("OCR模型正在加载中...\n\n"
+                                 "这可能需要几秒钟时间。");
+                    break;
+                case OCREngineState::Ready:
+                    message = tr("OCR功能已就绪\n\n"
+                                 "您可以在扫描版PDF上使用悬停取词功能。");
+                    break;
+                case OCREngineState::Error:
+                    message = tr("OCR初始化失败\n\n"
+                                 "错误: %1\n\n"
+                                 "请检查模型文件是否存在。")
+                                  .arg(OCRManager::instance().lastError());
+                    break;
+                }
+
+                QMessageBox::information(this, tr("OCR状态"), message);
+            });
+
+    // 连接OCR状态变化
+    connect(&OCRManager::instance(), &OCRManager::engineStateChanged,
+            this, &MainWindow::onOCREngineStateChanged);
 
     updateStatusBar();
 }
@@ -900,7 +991,6 @@ void MainWindow::setupConnections()
     });
 }
 
-// ========== 状态管理 ==========
 
 void MainWindow::updateUIState()
 {
@@ -913,6 +1003,7 @@ void MainWindow::updateUIState()
     PageDisplayMode displayMode = hasDocument ? tab->displayMode() : PageDisplayMode::SinglePage;
     ZoomMode zoomMode = hasDocument ? tab->zoomMode() : ZoomMode::FitWidth;
     bool canEnhance = hasDocument && !tab->isTextPDF();
+    bool canOCR = hasDocument && !tab->isTextPDF();
 
     // 文件操作
     m_closeAction->setEnabled(hasDocument);
@@ -952,20 +1043,6 @@ void MainWindow::updateUIState()
     m_doublePageAction->setChecked(hasDocument && displayMode == PageDisplayMode::DoublePage);
     m_continuousScrollAction->setChecked(hasDocument && continuousScroll);
 
-    // 视图操作 - 工具栏
-    if (m_singlePageToolbarAction) {
-        m_singlePageToolbarAction->setEnabled(hasDocument);
-        m_singlePageToolbarAction->setChecked(hasDocument && displayMode == PageDisplayMode::SinglePage);
-    }
-    if (m_doublePageToolbarAction) {
-        m_doublePageToolbarAction->setEnabled(hasDocument);
-        m_doublePageToolbarAction->setChecked(hasDocument && displayMode == PageDisplayMode::DoublePage);
-    }
-    if (m_continuousScrollToolbarAction) {
-        m_continuousScrollToolbarAction->setEnabled(hasDocument && displayMode == PageDisplayMode::SinglePage);
-        m_continuousScrollToolbarAction->setChecked(hasDocument && continuousScroll);
-    }
-
     // 纸质增强按钮
     m_paperEffectAction->setEnabled(canEnhance);
     // 修改图标或样式以提示不可用原因
@@ -988,6 +1065,35 @@ void MainWindow::updateUIState()
         }
     }
 
+    // OCR 悬停取词按钮
+    bool ocrCanEnable = hasDocument && !tab->isTextPDF();
+    bool ocrReady = (OCRManager::instance().engineState() == OCREngineState::Ready);
+    m_ocrHoverAction->setEnabled(ocrCanEnable);
+    // 更新工具提示
+    if (!hasDocument) {
+        m_ocrHoverAction->setToolTip(tr("OCR悬停取词 (Ctrl+Shift+O)\n(需要打开文档)"));
+    } else if (!ocrCanEnable) {
+        m_ocrHoverAction->setToolTip(tr("OCR悬停取词 (Ctrl+Shift+O)\n(当前是文本PDF，不需要OCR)"));
+    } else if (!ocrReady) {
+        OCREngineState state = OCRManager::instance().engineState();
+        if (state == OCREngineState::Loading) {
+            m_ocrHoverAction->setToolTip(tr("OCR悬停取词 (Ctrl+Shift+O)\n(OCR引擎加载中...)"));
+        } else if (state == OCREngineState::Error) {
+            m_ocrHoverAction->setToolTip(tr("OCR悬停取词 (Ctrl+Shift+O)\n(OCR引擎初始化失败)"));
+        } else {
+            m_ocrHoverAction->setToolTip(tr("OCR悬停取词 (Ctrl+Shift+O)\n(OCR引擎未就绪)"));
+        }
+    } else {
+        m_ocrHoverAction->setToolTip(tr("启用OCR悬停取词功能 (Ctrl+Shift+O)\n(仅扫描版PDF)"));
+    }
+
+    // 同步勾选状态
+    if (hasDocument) {
+        m_ocrHoverAction->setChecked(tab->isOCRHoverEnabled());
+    } else {
+        m_ocrHoverAction->setChecked(false);
+    }
+
     // 导航面板
     m_showNavigationAction->setEnabled(hasDocument);
     m_showLinksAction->setEnabled(hasDocument);
@@ -995,11 +1101,6 @@ void MainWindow::updateUIState()
     // 工具栏组件
     m_navPanelAction->setEnabled(hasDocument);
     m_navPanelAction->setChecked(m_navigationDock->isVisible());
-
-    m_fitPageToolbarAction->setEnabled(hasDocument && zoomMode != ZoomMode::FitPage);
-    m_fitPageToolbarAction->setChecked(hasDocument && zoomMode == ZoomMode::FitPage);
-    m_fitWidthToolbarAction->setEnabled(hasDocument && zoomMode != ZoomMode::FitWidth);
-    m_fitWidthToolbarAction->setChecked(hasDocument && zoomMode == ZoomMode::FitWidth);
 
     if (m_pageSpinBox) {
         m_pageSpinBox->setEnabled(hasDocument);
@@ -1073,8 +1174,6 @@ void MainWindow::updateStatusBar()
     }
 }
 
-// ========== 事件处理 ==========
-
 void MainWindow::resizeEvent(QResizeEvent* event)
 {
     QMainWindow::resizeEvent(event);
@@ -1141,4 +1240,112 @@ void MainWindow::togglePaperEffect()
 
     bool enabled = m_paperEffectAction->isChecked();
     tab->setPaperEffectEnabled(enabled);
+}
+
+void MainWindow::toggleOCRHover()
+{
+    bool enabled = m_ocrHoverAction->isChecked();
+
+    PDFDocumentTab* tab = currentTab();
+    if (!tab || !tab->isDocumentLoaded()) {
+        m_ocrHoverAction->setChecked(false);
+        return;
+    }
+
+    // 只对扫描版PDF启用
+    if (tab->isTextPDF()) {
+        QMessageBox::information(this, tr("功能不可用"),
+                                 tr("OCR悬停取词仅适用于扫描版PDF。\n"
+                                    "当前文档是原生文本PDF，请直接选择文字。"));
+        m_ocrHoverAction->setChecked(false);
+        return;
+    }
+
+    // 首次启用时初始化OCR
+    if (enabled && !m_ocrInitialized) {
+        initializeOCRManager();
+    }
+
+    // 等待OCR就绪
+    if (enabled && !OCRManager::instance().isReady()) {
+        OCREngineState state = OCRManager::instance().engineState();
+
+        if (state == OCREngineState::Loading) {
+            QMessageBox::information(this, tr("请稍候"),
+                                     tr("OCR模型正在加载中，请稍候...\n\n"
+                                        "加载完成后会自动启用悬停取词功能。"));
+            m_ocrHoverAction->setChecked(false);
+            return;
+        } else if (state == OCREngineState::Error) {
+            QMessageBox::critical(this, tr("OCR初始化失败"),
+                                  tr("OCR引擎初始化失败:\n%1\n\n"
+                                     "请检查模型文件是否存在于 models 目录。")
+                                      .arg(OCRManager::instance().lastError()));
+            m_ocrHoverAction->setChecked(false);
+            return;
+        }
+    }
+
+    // 设置当前Tab的OCR状态
+    tab->setOCRHoverEnabled(enabled);
+}
+
+void MainWindow::initializeOCRManager()
+{
+    if (m_ocrInitialized) {
+        return;
+    }
+
+    QString modelDir = AppConfig::instance().ocrModelDir();
+
+    qInfo() << "MainWindow: Initializing OCR with model dir:" << modelDir;
+
+    bool started = OCRManager::instance().initialize(modelDir);
+
+    if (started) {
+        m_ocrInitialized = true;
+        qInfo() << "MainWindow: OCR initialization started";
+    } else {
+        qWarning() << "MainWindow: Failed to start OCR initialization";
+    }
+}
+
+void MainWindow::onOCREngineStateChanged(OCREngineState state)
+{
+    // 更新状态指示器
+    if (m_ocrIndicator) {
+        m_ocrIndicator->setState(state);
+    }
+
+    // 根据状态更新按钮可用性
+    PDFDocumentTab* tab = currentTab();
+    bool canEnable = (state == OCREngineState::Ready) &&
+                     tab &&
+                     tab->isDocumentLoaded() &&
+                     !tab->isTextPDF();
+
+    if (m_ocrHoverAction) {
+        m_ocrHoverAction->setEnabled(canEnable);
+    }
+
+    // 如果初始化失败，显示错误
+    if (state == OCREngineState::Error) {
+        QString error = OCRManager::instance().lastError();
+        qWarning() << "OCR initialization failed:" << error;
+
+        // 取消勾选
+        if (m_ocrHoverAction) {
+            m_ocrHoverAction->setChecked(false);
+        }
+    }
+
+    // 如果初始化成功且用户已经尝试启用，自动启用
+    if (state == OCREngineState::Ready &&
+        m_ocrHoverAction &&
+        m_ocrHoverAction->isChecked()) {
+
+        if (tab) {
+            tab->setOCRHoverEnabled(true);
+        }
+    }
 }

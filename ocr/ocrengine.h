@@ -114,6 +114,13 @@ private:
     std::unique_ptr<Ort::Session> m_clsSession;
     std::unique_ptr<Ort::Session> m_recSession;
 
+    std::vector<std::string> m_detInputNames;
+    std::vector<std::string> m_detOutputNames;
+    std::vector<std::string> m_clsInputNames;
+    std::vector<std::string> m_clsOutputNames;
+    std::vector<std::string> m_recInputNames;
+    std::vector<std::string> m_recOutputNames;
+
     // 字符集
     QStringList m_characterSet;
 

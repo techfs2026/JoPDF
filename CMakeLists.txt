@@ -47,14 +47,17 @@ set(OPENCV_INCLUDE_DIR "${OPENCV_DIR}/include")
 set(OPENCV_LIB_DEBUG   "${OPENCV_DIR}/lib/Debug")
 set(OPENCV_LIB_RELEASE "${OPENCV_DIR}/lib/Release")
 
+# DLL 目录（用于运行时拷贝）
+set(OPENCV_BIN_DEBUG   "${OPENCV_DIR}/bin/Debug")
+set(OPENCV_BIN_RELEASE "${OPENCV_DIR}/bin/Release")
+
 # -----------------------------
 # Third-party: onnxruntime
 # -----------------------------
 set(ONNXRUNTIME_DIR "D:/Ext-Lib/onnxruntime-win-x64")
 set(ONNXRUNTIME_INCLUDE_DIR "${ONNXRUNTIME_DIR}/include")
-
-set(ONNXRUNTIME_LIB   "${ONNXRUNTIME_DIR}/lib")
-
+set(ONNXRUNTIME_LIB_DIR "${ONNXRUNTIME_DIR}/lib")
+set(ONNXRUNTIME_BIN_DIR "${ONNXRUNTIME_DIR}/lib")  # DLL 通常也在 lib 目录
 
 # -----------------------------
 # Collect all source files automatically
@@ -78,7 +81,6 @@ qt_standard_project_setup()
 qt_add_executable(MuQt
     WIN32 MACOSX_BUNDLE
     ${PROJECT_SOURCES}
-
     ${APP_ICON_RESOURCE_WINDOWS}
 )
 
@@ -88,6 +90,7 @@ qt_add_executable(MuQt
 target_include_directories(MuQt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/ui
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/ocr
     ${CMAKE_CURRENT_SOURCE_DIR}/session
     ${CMAKE_CURRENT_SOURCE_DIR}/model
     ${CMAKE_CURRENT_SOURCE_DIR}/core
@@ -112,22 +115,98 @@ target_link_directories(MuQt PRIVATE
     "$<$<CONFIG:Debug>:${OPENCV_LIB_DEBUG}>"
     "$<$<CONFIG:Release>:${OPENCV_LIB_RELEASE}>"
 
-    "$<$<CONFIG:Debug>:${ONNXRUNTIME_LIB}>"
-    "$<$<CONFIG:Release>:${ONNXRUNTIME_LIB}>"
+    ${ONNXRUNTIME_LIB_DIR}
 )
 
 # -----------------------------
-# Link libraries
+# Link libraries (✅ 修正：链接 .lib 而不是 .dll)
 # -----------------------------
 target_link_libraries(MuQt PRIVATE
     Qt::Core
     Qt::Widgets
     Qt6::Concurrent
 
+    # MuPDF
+    libmupdf.lib
+    libthirdparty.lib
 
-    "$<$<CONFIG:Debug>:libmupdf.lib;libthirdparty.lib;opencv_world4120d.dll;onnxruntime.dll>"
-    "$<$<CONFIG:Release>:libmupdf.lib;libthirdparty.lib;opencv_world4120.dll;onnxruntime.dll>"
+    # OpenCV (✅ 链接 .lib 文件)
+    "$<$<CONFIG:Debug>:opencv_world4120d.lib>"
+    "$<$<CONFIG:Release>:opencv_world4120.lib>"
+
+    # ONNX Runtime (✅ 只链接 onnxruntime.lib)
+    onnxruntime.lib
 )
+
+# -----------------------------
+# Copy runtime DLLs to output directory
+# -----------------------------
+# 定义 DLL 拷贝函数
+function(copy_dlls target dll_list destination)
+    foreach(dll ${dll_list})
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${dll}
+                ${destination}
+            COMMENT "Copying ${dll} to ${destination}"
+        )
+    endforeach()
+endfunction()
+
+# OpenCV DLLs
+if(EXISTS "${OPENCV_BIN_DEBUG}/opencv_world4120d.dll")
+    copy_dlls(MuQt
+        "${OPENCV_BIN_DEBUG}/opencv_world4120d.dll"
+        "$<TARGET_FILE_DIR:MuQt>"
+    )
+endif()
+
+if(EXISTS "${OPENCV_BIN_RELEASE}/opencv_world4120.dll")
+    copy_dlls(MuQt
+        "${OPENCV_BIN_RELEASE}/opencv_world4120.dll"
+        "$<TARGET_FILE_DIR:MuQt>"
+    )
+endif()
+
+# ONNX Runtime DLLs (✅ 必须拷贝两个 DLL)
+set(ONNX_DLLS
+    "${ONNXRUNTIME_BIN_DIR}/onnxruntime.dll"
+    "${ONNXRUNTIME_BIN_DIR}/onnxruntime_providers_shared.dll"
+)
+
+foreach(dll ${ONNX_DLLS})
+    if(EXISTS ${dll})
+        add_custom_command(TARGET MuQt POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${dll}
+                $<TARGET_FILE_DIR:MuQt>
+            COMMENT "Copying ${dll}"
+        )
+    else()
+        message(WARNING "ONNX Runtime DLL not found: ${dll}")
+    endif()
+endforeach()
+
+# MuPDF DLLs (如果有的话)
+# ... 根据你的 MuPDF 配置添加
+
+# -----------------------------
+# Copy OCR models to output directory
+# -----------------------------
+set(OCR_MODELS_SRC "${CMAKE_SOURCE_DIR}/ocr/models")
+set(OCR_MODELS_DST "$<TARGET_FILE_DIR:MuQt>/ocr/models")
+
+if(EXISTS "${OCR_MODELS_SRC}")
+    add_custom_command(TARGET MuQt POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${OCR_MODELS_DST}
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${OCR_MODELS_SRC}
+            ${OCR_MODELS_DST}
+        COMMENT "Copying OCR models to output directory"
+    )
+else()
+    message(WARNING "OCR models directory not found: ${OCR_MODELS_SRC}")
+endif()
 
 # -----------------------------
 # Install section
@@ -138,6 +217,18 @@ install(TARGETS MuQt
     BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+# 安装 DLLs
+install(FILES ${ONNX_DLLS}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    OPTIONAL
+)
+
+# 安装 OCR 模型
+install(DIRECTORY "${OCR_MODELS_SRC}"
+    DESTINATION ${CMAKE_INSTALL_BINDIR}/ocr
+    OPTIONAL
 )
 
 # -----------------------------

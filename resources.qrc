@@ -22,5 +22,6 @@
         <file>resources/icons/zoom-out.png</file>
         <file>resources/windows.ico</file>
         <file>resources/icons/paper-effect.png</file>
+        <file>resources/icons/ocr.png</file>
     </qresource>
 </RCC>
