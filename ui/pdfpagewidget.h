@@ -84,6 +84,8 @@ public:
      */
     void setOCRHoverEnabled(bool enabled);
 
+    void triggerOCRAtCurrentPosition();
+
 signals:
 
     /**
@@ -132,12 +134,15 @@ signals:
      */
     void ocrHoverTriggered(const QImage& image, const QRect& regionRect, const QPoint& lastHoverPos);
 
+
+
 protected:
 
     void paintEvent(QPaintEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
 
     QSize sizeHint() const override;
 
@@ -178,7 +183,7 @@ private:
     // OCR相关
     bool m_ocrHoverEnabled;
     QPoint m_lastHoverPos;
-    QTimer m_hoverTimer;  // 悬停计时器
+    QTimer m_hoverTimer;
 };
 
 #endif // PDFPAGEWIDGET_H

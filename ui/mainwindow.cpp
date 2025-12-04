@@ -782,9 +782,11 @@ void MainWindow::createActions()
             this, &MainWindow::togglePaperEffect);
 
     m_ocrHoverAction = new QAction(QIcon(":icons/resources/icons/ocr.png"),
-                                   tr("OCR悬停取词"), this);
+                                   tr("OCR取词"), this);
     m_ocrHoverAction->setShortcut(QKeySequence(tr("Ctrl+Shift+O")));
-    m_ocrHoverAction->setToolTip(tr("启用OCR悬停取词功能 (Ctrl+Shift+O)\n(仅扫描版PDF)"));
+    m_ocrHoverAction->setToolTip(tr("启用OCR取词模式 (Ctrl+Shift+O)\n"
+                                    "启用后按 Ctrl+Q 触发识别\n"
+                                    "(仅扫描版PDF)"));
     m_ocrHoverAction->setCheckable(true);
     m_ocrHoverAction->setChecked(false);
     m_ocrHoverAction->setEnabled(false);
@@ -1070,22 +1072,25 @@ void MainWindow::updateUIState()
     bool ocrCanEnable = hasDocument && !tab->isTextPDF();
     bool ocrReady = (OCRManager::instance().engineState() == OCREngineState::Ready);
     m_ocrHoverAction->setEnabled(ocrCanEnable);
+
     // 更新工具提示
     if (!hasDocument) {
-        m_ocrHoverAction->setToolTip(tr("OCR悬停取词 (Ctrl+Shift+O)\n(需要打开文档)"));
+        m_ocrHoverAction->setToolTip(tr("OCR取词 (Ctrl+Shift+O)\n(需要打开文档)"));
     } else if (!ocrCanEnable) {
-        m_ocrHoverAction->setToolTip(tr("OCR悬停取词 (Ctrl+Shift+O)\n(当前是文本PDF，不需要OCR)"));
+        m_ocrHoverAction->setToolTip(tr("OCR取词 (Ctrl+Shift+O)\n(当前是文本PDF,不需要OCR)"));
     } else if (!ocrReady) {
         OCREngineState state = OCRManager::instance().engineState();
         if (state == OCREngineState::Loading) {
-            m_ocrHoverAction->setToolTip(tr("OCR悬停取词 (Ctrl+Shift+O)\n(OCR引擎加载中...)"));
+            m_ocrHoverAction->setToolTip(tr("OCR取词 (Ctrl+Shift+O)\n(OCR引擎加载中...)"));
         } else if (state == OCREngineState::Error) {
-            m_ocrHoverAction->setToolTip(tr("OCR悬停取词 (Ctrl+Shift+O)\n(OCR引擎初始化失败)"));
+            m_ocrHoverAction->setToolTip(tr("OCR取词 (Ctrl+Shift+O)\n(OCR引擎初始化失败)"));
         } else {
-            m_ocrHoverAction->setToolTip(tr("OCR悬停取词 (Ctrl+Shift+O)\n(OCR引擎未就绪)"));
+            m_ocrHoverAction->setToolTip(tr("OCR取词 (Ctrl+Shift+O)\n(OCR引擎未就绪)"));
         }
     } else {
-        m_ocrHoverAction->setToolTip(tr("启用OCR悬停取词功能 (Ctrl+Shift+O)\n(仅扫描版PDF)"));
+        m_ocrHoverAction->setToolTip(tr("启用OCR取词模式 (Ctrl+Shift+O)\n"
+                                        "启用后按 Ctrl+Q 触发识别\n"
+                                        "(仅扫描版PDF)"));
     }
 
     // 同步勾选状态
@@ -1253,11 +1258,11 @@ void MainWindow::toggleOCRHover()
         return;
     }
 
-    // 只对扫描版PDF启用
+    // 只对扫描版PDF可用
     if (tab->isTextPDF()) {
         QMessageBox::information(this, tr("功能不可用"),
-                                 tr("OCR悬停取词仅适用于扫描版PDF。\n"
-                                    "当前文档是原生文本PDF，请直接选择文字。"));
+                                 tr("OCR取词仅适用于扫描版PDF。\n"
+                                    "当前文档是原生文本PDF,请直接选择文字。"));
         m_ocrHoverAction->setChecked(false);
         return;
     }
@@ -1273,8 +1278,8 @@ void MainWindow::toggleOCRHover()
 
         if (state == OCREngineState::Loading) {
             QMessageBox::information(this, tr("请稍候"),
-                                     tr("OCR模型正在加载中，请稍候...\n\n"
-                                        "加载完成后会自动启用悬停取词功能。"));
+                                     tr("OCR模型正在加载中,请稍候...\n\n"
+                                        "加载完成后会自动启用取词功能。"));
             m_ocrHoverAction->setChecked(false);
             return;
         } else if (state == OCREngineState::Error) {

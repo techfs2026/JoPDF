@@ -468,22 +468,62 @@ void PDFPageWidget::drawTextSelection(QPainter& painter, int pageIndex, int page
     painter.restore();
 }
 
+void PDFPageWidget::triggerOCRAtCurrentPosition()
+{
+    if (!m_ocrHoverEnabled) {
+        qDebug() << "OCR hover not enabled";
+        return;
+    }
+
+    const PDFDocumentState* state = m_session->state();
+    if (!state->isDocumentLoaded()) {
+        qDebug() << "No document loaded";
+        return;
+    }
+
+    // 检查是否在页面上
+    int pageX, pageY;
+    int pageIndex = getPageAtPos(m_lastHoverPos, &pageX, &pageY);
+
+    if (pageIndex < 0) {
+        qDebug() << "Mouse not on any page";
+        return;
+    }
+
+    // 提取悬停区域的图像
+    QImage image = extractHoverRegion(m_lastHoverPos);
+    if (!image.isNull()) {
+        QRect regionRect = calculateHoverRect(m_lastHoverPos);
+        qInfo() << "Manual OCR triggered at position:" << m_lastHoverPos;
+        emit ocrHoverTriggered(image, regionRect, m_lastHoverPos);
+    } else {
+        qDebug() << "Failed to extract hover region";
+    }
+}
+
+void PDFPageWidget::keyPressEvent(QKeyEvent* event)
+{
+    // 检查是否按下Ctrl+Q
+    if (m_ocrHoverEnabled &&
+        event->key() == Qt::Key_Q &&
+        event->modifiers() == Qt::ControlModifier) {
+
+        triggerOCRAtCurrentPosition();
+        event->accept();
+        return;
+    }
+
+    QWidget::keyPressEvent(event);
+}
+
+
 void PDFPageWidget::mouseMoveEvent(QMouseEvent* event)
 {
-    // 检查OCR悬停模式
+    // 始终更新鼠标位置（用于快捷键触发OCR）
+    m_lastHoverPos = event->pos();
+
+    // OCR模式下不需要定时器，只记录位置
     if (m_ocrHoverEnabled) {
-        const PDFDocumentState* state = m_session->state();
-
-        // 只在扫描版PDF上启用
-        if (!state->isTextPDF()) {
-            m_lastHoverPos = event->pos();
-
-            // 重启悬停计时器
-            m_hoverTimer.stop();
-            m_hoverTimer.start();
-        }
-
-        // OCR模式下不执行其他鼠标移动逻辑
         event->accept();
         return;
     }
@@ -575,18 +615,6 @@ void PDFPageWidget::setupOCRHover()
     // 配置悬停计时器
     m_hoverTimer.setSingleShot(true);
     m_hoverTimer.setInterval(AppConfig::instance().ocrDebounceDelay());
-
-    connect(&m_hoverTimer, &QTimer::timeout, this, [this]() {
-        if (!m_ocrHoverEnabled) return;
-
-        // 提取悬停区域的图像
-        QImage image = extractHoverRegion(m_lastHoverPos);
-        if (!image.isNull()) {
-            QRect regionRect = calculateHoverRect(m_lastHoverPos);
-
-            emit ocrHoverTriggered(image, regionRect, m_lastHoverPos);
-        }
-    });
 }
 
 void PDFPageWidget::setOCRHoverEnabled(bool enabled)
