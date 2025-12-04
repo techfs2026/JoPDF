@@ -192,8 +192,9 @@ Ort::Value OrtInferSession::matToTensor(const cv::Mat& mat) {
 
     // 获取Mat的尺寸信息
     std::vector<int64_t> inputShape;
+
     if (continuousMat.dims == 2) {
-        // 2D图像: [H, W] -> [1, C, H, W] 或 [1, H, W, C]
+        // 2D图像: [H, W] -> [1, C, H, W]
         inputShape = {
             1,
             static_cast<int64_t>(continuousMat.channels()),
@@ -201,9 +202,15 @@ Ort::Value OrtInferSession::matToTensor(const cv::Mat& mat) {
             static_cast<int64_t>(continuousMat.cols)
         };
     } else if (continuousMat.dims == 3) {
-        // 3D数据
-        inputShape.resize(continuousMat.dims);
-        for (int i = 0; i < continuousMat.dims; ++i) {
+        // 3D数据: [C, H, W] -> 直接使用
+        inputShape.resize(3);
+        for (int i = 0; i < 3; ++i) {
+            inputShape[i] = continuousMat.size[i];
+        }
+    } else if (continuousMat.dims == 4) {
+        // ✅ 新增：4D数据支持 [N, C, H, W]
+        inputShape.resize(4);
+        for (int i = 0; i < 4; ++i) {
             inputShape[i] = continuousMat.size[i];
         }
     } else {

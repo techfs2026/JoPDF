@@ -84,6 +84,8 @@ private:
     bool m_useCls = true;
     bool m_useRec = true;
     bool m_returnWordBox = false;
+
+    bool m_isProcessing = false;
 };
 
 #endif // OCRENGINE_H

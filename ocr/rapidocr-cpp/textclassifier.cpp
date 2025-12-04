@@ -138,42 +138,26 @@ cv::Mat TextClassifier::resizeNormImg(const cv::Mat& img) {
     // 转换为float
     resizedImage.convertTo(resizedImage, CV_32F);
 
-    // 转换为CHW格式并归一化
-    cv::Mat normalizedImg;
-    if (imgC == 1) {
-        // 灰度图
-        resizedImage = resizedImage / 255.0f;
-        normalizedImg = resizedImage;
-    } else {
-        // 彩色图：转换为CHW格式
-        resizedImage = resizedImage / 255.0f;
+    // ✅ 正确的归一化方式
+    std::vector<cv::Mat> channels;
+    cv::split(resizedImage, channels);
 
-        std::vector<cv::Mat> channels;
-        cv::split(resizedImage, channels);
-
-        // 创建CHW格式的Mat
-        normalizedImg = cv::Mat(imgC * imgH, resizedW, CV_32F);
-        for (int c = 0; c < imgC; ++c) {
-            cv::Mat roi = normalizedImg(cv::Rect(0, c * imgH, resizedW, imgH));
-            channels[c].copyTo(roi);
-        }
+    // 归一化: /255, -0.5, /0.5
+    for (auto& channel : channels) {
+        channel /= 255.0f;
+        channel -= 0.5f;
+        channel /= 0.5f;
     }
 
-    // 归一化：减0.5除以0.5
-    normalizedImg = (normalizedImg - 0.5f) / 0.5f;
-
-    // 创建padding后的图像
-    cv::Mat paddingImg = cv::Mat::zeros(imgC * imgH, imgW, CV_32F);
-    normalizedImg.copyTo(paddingImg(cv::Rect(0, 0, resizedW, imgC * imgH)));
-
-    // 重新整形为 [C, H, W] 的连续内存布局
-    cv::Mat result(std::vector<int>{imgC, imgH, imgW}, CV_32F);
+    // 创建padding后的图像 [C, H, W]
+    cv::Mat result(std::vector<int>{imgC, imgH, imgW}, CV_32F, cv::Scalar(0));
 
     for (int c = 0; c < imgC; ++c) {
-        cv::Mat srcChannel = paddingImg(cv::Rect(0, c * imgH, imgW, imgH));
         cv::Mat dstChannel(imgH, imgW, CV_32F,
-                          result.ptr<float>() + c * imgH * imgW);
-        srcChannel.copyTo(dstChannel);
+                           result.ptr<float>() + c * imgH * imgW);
+        cv::Mat srcChannel(imgH, resizedW, CV_32F);
+        channels[c].copyTo(srcChannel);
+        srcChannel.copyTo(dstChannel(cv::Rect(0, 0, resizedW, imgH)));
     }
 
     return result;

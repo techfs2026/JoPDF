@@ -92,8 +92,15 @@ OCRResult OCREngine::recognize(const QImage& image)
 {
     OCRResult result;
 
+    if (m_isProcessing) {
+        result.error = tr("OCR正在处理中，请稍候");
+        qDebug() << "OCR busy, request rejected";
+        return result;
+    }
+
     if (m_state != OCREngineState::Ready) {
         result.error = tr("OCR引擎未就绪");
+        qDebug() << "OCR not ready, current state:" << static_cast<int>(m_state);
         return result;
     }
 
@@ -103,6 +110,7 @@ OCRResult OCREngine::recognize(const QImage& image)
     }
 
     try {
+        m_isProcessing = true;  // 设置处理标志
         setState(OCREngineState::Processing);
 
         qDebug() << "OCREngine: Starting recognition...";
@@ -114,6 +122,7 @@ OCRResult OCREngine::recognize(const QImage& image)
         result = convertToOCRResult(output);
 
         setState(OCREngineState::Ready);
+        m_isProcessing = false;  // 清除处理标志
 
         if (result.success) {
             qInfo() << "OCREngine: Recognition completed";
@@ -128,7 +137,9 @@ OCRResult OCREngine::recognize(const QImage& image)
     } catch (const std::exception& e) {
         result.error = tr("识别异常: %1").arg(QString::fromStdString(e.what()));
         qWarning() << result.error;
+
         setState(OCREngineState::Ready);
+        m_isProcessing = false;  // 确保清除标志
     }
 
     return result;

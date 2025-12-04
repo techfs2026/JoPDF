@@ -6,6 +6,7 @@
 #include <fstream>
 #include <QString>
 #include <QChar>
+#include <QDebug>
 
 namespace RapidOCR {
 
@@ -90,14 +91,85 @@ CTCLabelDecode::operator()(const cv::Mat& preds,
                            const std::vector<float>& whRatioList,
                            float maxWhRatio) {
 
-    // preds shape: [batch_size, seq_len, num_classes]
-    if (preds.dims != 3) {
-        throw std::runtime_error("Predictions must be 3D tensor");
+    qDebug() << "CTCLabelDecode: Input preds dims=" << preds.dims;
+    if (preds.dims >= 1) {
+        qDebug() << "  Shape:";
+        for (int i = 0; i < preds.dims; ++i) {
+            qDebug() << "    dim[" << i << "]=" << preds.size[i];
+        }
     }
 
-    int batchSize = preds.size[0];
-    int seqLen = preds.size[1];
-    int numClasses = preds.size[2];
+    cv::Mat preds3D;
+
+    if (preds.dims == 2) {
+        // 2D: [seq_len, num_classes] -> 添加batch维度
+        qDebug() << "Converting 2D to 3D tensor";
+        int seqLen = preds.size[0];
+        int numClasses = preds.size[1];
+
+        // 重塑为 [1, seq_len, num_classes]
+        int newShape[] = {1, seqLen, numClasses};
+        preds3D = preds.reshape(0, 3, newShape);
+
+    } else if (preds.dims == 3) {
+        // 已经是3D，直接使用
+        preds3D = preds;
+
+    } else if (preds.dims == 4) {
+        // 4D: [batch, 1, seq_len, num_classes] -> squeeze掉维度1
+        qDebug() << "Converting 4D to 3D tensor";
+
+        int dim0 = preds.size[0];
+        int dim1 = preds.size[1];
+        int dim2 = preds.size[2];
+        int dim3 = preds.size[3];
+
+        if (dim1 == 1) {
+            // 移除第二个维度: [batch, 1, seq, cls] -> [batch, seq, cls]
+            int batch = dim0;
+            int seqLen = dim2;
+            int numClasses = dim3;
+
+            int newShape[] = {batch, seqLen, numClasses};
+            preds3D = cv::Mat(3, newShape, CV_32F);
+
+            const float* srcPtr = preds.ptr<float>();
+            float* dstPtr = preds3D.ptr<float>();
+
+            // 4D索引: [b, 0, s, c]
+            // 计算步长
+            int stride_b = dim1 * dim2 * dim3;  // batch步长
+            int stride_1 = dim2 * dim3;         // dim1步长 (总是0因为dim1=1)
+            int stride_s = dim3;                // seq步长
+            int stride_c = 1;                   // class步长
+
+            for (int b = 0; b < batch; ++b) {
+                for (int s = 0; s < seqLen; ++s) {
+                    for (int c = 0; c < numClasses; ++c) {
+                        // 4D源索引
+                        int srcIdx = b * stride_b + 0 * stride_1 + s * stride_s + c * stride_c;
+                        // 3D目标索引
+                        int dstIdx = b * (seqLen * numClasses) + s * numClasses + c;
+
+                        dstPtr[dstIdx] = srcPtr[srcIdx];
+                    }
+                }
+            }
+        } else {
+            throw std::runtime_error("Unsupported 4D tensor shape: dim[1] must be 1");
+        }
+
+    } else {
+        throw std::runtime_error("Predictions must be 2D, 3D or 4D tensor, got " +
+                                 std::to_string(preds.dims) + "D");
+    }
+
+    // 现在 preds3D 一定是3D
+    int batchSize = preds3D.size[0];
+    int seqLen = preds3D.size[1];
+    int numClasses = preds3D.size[2];
+
+    qDebug() << "Processed shape: [" << batchSize << "," << seqLen << "," << numClasses << "]";
 
     // 计算 argmax 和 max
     cv::Mat predsIdx(batchSize, seqLen, CV_32S);
@@ -109,7 +181,8 @@ CTCLabelDecode::operator()(const cv::Mat& preds,
             int maxIdx = 0;
 
             for (int c = 0; c < numClasses; ++c) {
-                float val = preds.at<float>(b, s, c);
+
+                float val = preds3D.ptr<float>(b)[s * numClasses + c];
                 if (val > maxVal) {
                     maxVal = val;
                     maxIdx = c;
@@ -493,17 +566,19 @@ cv::Mat TextRecognizer::resizeNormImg(const cv::Mat& img, float maxWhRatio) {
     cv::Mat resizedImage;
     cv::resize(img, resizedImage, cv::Size(resizedW, imgHeight));
 
-    // 转换为float并归一化
+    // 转换为float
     resizedImage.convertTo(resizedImage, CV_32F);
 
-    // 转换为CHW格式
+    // ✅ 正确的归一化方式（完全匹配Python）
+    // transpose((2, 0, 1)) / 255 - 0.5 / 0.5
     std::vector<cv::Mat> channels;
     cv::split(resizedImage, channels);
 
-    // 归一化: /255, -0.5, /0.5
+    // 归一化每个通道
     for (auto& channel : channels) {
-        channel = channel / 255.0f;
-        channel = (channel - 0.5f) / 0.5f;
+        channel /= 255.0f;  // 除以255
+        channel -= 0.5f;    // 减0.5
+        channel /= 0.5f;    // 除以0.5
     }
 
     // 创建padding后的图像 [C, H, W]

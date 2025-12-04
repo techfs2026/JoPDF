@@ -97,27 +97,28 @@ cv::Mat TextDetector::preprocess(const cv::Mat& img, cv::Size& outOriSize) {
     cv::Mat resizedImg;
     cv::resize(img, resizedImg, cv::Size(resizeW, resizeH));
 
-    // 归一化
-    resizedImg.convertTo(resizedImg, CV_32F, 1.0 / 255.0);
+    // ✅ 正确的归一化方式（匹配Python版本）
+    // 1. 转为float
+    resizedImg.convertTo(resizedImg, CV_32F);
 
-    // 减均值除标准差
-    cv::Mat meanMat(1, 1, CV_32FC3, cv::Scalar(config_.mean[0], config_.mean[1], config_.mean[2]));
-    cv::Mat stdMat(1, 1, CV_32FC3, cv::Scalar(config_.std[0], config_.std[1], config_.std[2]));
-
-    cv::subtract(resizedImg, meanMat, resizedImg);
-    cv::divide(resizedImg, stdMat, resizedImg);
-
-    // 转换为 NCHW 格式 (OnnxRuntime 输入格式)
+    // 2. 转为CHW格式并归一化
     std::vector<cv::Mat> channels;
     cv::split(resizedImg, channels);
 
-    // 创建输出Mat [1, 3, H, W]
+    // 3. 对每个通道: /255, -mean, /std
+    for (int i = 0; i < 3; ++i) {
+        channels[i] /= 255.0f;
+        channels[i] -= config_.mean[i];
+        channels[i] /= config_.std[i];
+    }
+
+    // 4. 创建输出Mat [1, 3, H, W]
     int dims[] = {1, 3, resizeH, resizeW};
     cv::Mat blob(4, dims, CV_32F);
 
     for (int c = 0; c < 3; ++c) {
         cv::Mat channelMat(resizeH, resizeW, CV_32F,
-                          blob.ptr<float>() + c * resizeH * resizeW);
+                           blob.ptr<float>() + c * resizeH * resizeW);
         channels[c].copyTo(channelMat);
     }
 
