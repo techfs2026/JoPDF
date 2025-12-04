@@ -3,6 +3,7 @@
 #include "dictionaryconnector.h"
 #include "ocrstatusindicator.h"
 #include "ocrmanager.h"
+#include "chinesetokenizer.h"
 #include "appconfig.h"
 
 #include <QMenuBar>
@@ -1297,9 +1298,24 @@ void MainWindow::initializeOCRManager()
     }
 
     QString modelDir = AppConfig::instance().ocrModelDir();
+    QString dictDir = AppConfig::instance().jiebaDictDir();
 
     qInfo() << "MainWindow: Initializing OCR with model dir:" << modelDir;
+    qInfo() << "MainWindow: Initializing Jieba with dict dir:" << dictDir;
 
+    // 初始化分词器
+    if (!ChineseTokenizer::instance().isInitialized()) {
+        bool jiebaOk = ChineseTokenizer::instance().initialize(dictDir);
+        if (!jiebaOk) {
+            qWarning() << "Failed to initialize Jieba:"
+                       << ChineseTokenizer::instance().lastError();
+            QMessageBox::warning(this, tr("分词器初始化失败"),
+                                 tr("中文分词功能初始化失败:\n%1\n\nOCR识别将使用全部文本。")
+                                     .arg(ChineseTokenizer::instance().lastError()));
+        }
+    }
+
+    // 初始化OCR
     bool started = OCRManager::instance().initialize(modelDir);
 
     if (started) {

@@ -120,7 +120,7 @@ target_link_directories(MuQt PRIVATE
 )
 
 # -----------------------------
-# Link libraries (✅ 修正：链接 .lib 而不是 .dll)
+# Link libraries
 # -----------------------------
 target_link_libraries(MuQt PRIVATE
     Qt::Core

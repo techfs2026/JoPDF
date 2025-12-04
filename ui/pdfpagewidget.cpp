@@ -584,10 +584,7 @@ void PDFPageWidget::setupOCRHover()
         if (!image.isNull()) {
             QRect regionRect = calculateHoverRect(m_lastHoverPos);
 
-            // 转换为全局坐标
-            QRect globalRect = regionRect.translated(mapToGlobal(QPoint(0, 0)));
-
-            emit ocrHoverTriggered(image, globalRect);
+            emit ocrHoverTriggered(image, regionRect, m_lastHoverPos);
         }
     });
 }

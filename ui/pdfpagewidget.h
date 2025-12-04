@@ -130,7 +130,7 @@ signals:
      * @param image 提取的图像区域
      * @param regionRect 区域位置（Widget坐标系）
      */
-    void ocrHoverTriggered(const QImage& image, const QRect& regionRect);
+    void ocrHoverTriggered(const QImage& image, const QRect& regionRect, const QPoint& lastHoverPos);
 
 protected:
 

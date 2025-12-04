@@ -158,6 +158,8 @@ public:
     int ocrHoverRegionSize() const { return m_ocrHoverRegionSize; }
     void setOcrHoverRegionSize(int size) { m_ocrHoverRegionSize = size; }
 
+    QString jiebaDictDir() const { return m_jiebaDictDir; }
+
     // ========== 调试配置 ==========
 
     /// 是否启用调试输出
@@ -210,9 +212,11 @@ private:
     bool m_debugMode;
 
     // OCR设置
-    QString m_ocrModelDir = QCoreApplication::applicationDirPath() + "/ocr/models"; // 默认模型目录
+    QString m_ocrModelDir = QCoreApplication::applicationDirPath() + "/ocr/models";
     int m_ocrDebounceDelay = 300;      // 防抖延迟（毫秒）
     int m_ocrHoverRegionSize = 200;    // 悬停区域大小（像素）
+
+    QString m_jiebaDictDir = QCoreApplication::applicationDirPath() + "/dict";
 };
 
 #endif // APPCONFIG_H

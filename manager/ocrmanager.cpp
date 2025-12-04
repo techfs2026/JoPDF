@@ -45,7 +45,7 @@ bool OCRManager::initialize(const QString& modelDir)
                 }
             });
 
-    return m_engine->initializeSync(modelDir);
+    return m_engine->initializeAsync(modelDir);
 }
 
 bool OCRManager::isReady() const
@@ -58,7 +58,7 @@ OCREngineState OCRManager::engineState() const
     return m_engine ? m_engine->state() : OCREngineState::Uninitialized;
 }
 
-void OCRManager::requestOCR(const QImage& image, const QRect& regionRect)
+void OCRManager::requestOCR(const QImage& image, const QRect& regionRect, const QPoint& lastHoverPos)
 {
     if (!m_engine) {
         emit ocrFailed(tr("OCR引擎未初始化"));
@@ -82,6 +82,7 @@ void OCRManager::requestOCR(const QImage& image, const QRect& regionRect)
     m_pending.valid = true;
     m_pending.image = image;
     m_pending.regionRect = regionRect;
+    m_pending.lastHoverPos = lastHoverPos;
 
     // 启动防抖定时器
     m_debounceTimer.start(m_debounceDelay);
@@ -102,6 +103,7 @@ void OCRManager::performOCR()
     // 取出请求
     QImage image = m_pending.image;
     QRect regionRect = m_pending.regionRect;
+    QPoint lastHoverPos = m_pending.lastHoverPos;
     m_pending.valid = false;
 
     // 在后台线程执行OCR
@@ -113,11 +115,11 @@ void OCRManager::performOCR()
     QFutureWatcher<OCRResult>* watcher = new QFutureWatcher<OCRResult>(this);
 
     connect(watcher, &QFutureWatcher<OCRResult>::finished,
-            this, [this, watcher, regionRect]() {
+            this, [this, watcher, regionRect, lastHoverPos]() {
                 OCRResult result = watcher->result();
 
                 if (result.success) {
-                    emit ocrCompleted(result, regionRect);
+                    emit ocrCompleted(result, regionRect, lastHoverPos);
                 } else {
                     emit ocrFailed(result.error);
                 }

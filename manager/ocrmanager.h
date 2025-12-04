@@ -53,7 +53,7 @@ public:
      * @param image 待识别的图像区域
      * @param regionRect 区域在屏幕上的位置（用于定位浮层）
      */
-    void requestOCR(const QImage& image, const QRect& regionRect);
+    void requestOCR(const QImage& image, const QRect& regionRect, const QPoint& lastHoverPos);
 
     /**
      * @brief 取消待处理的OCR
@@ -76,7 +76,7 @@ signals:
      * @param result 识别结果
      * @param regionRect 识别区域（用于定位浮层）
      */
-    void ocrCompleted(const OCRResult& result, const QRect& regionRect);
+    void ocrCompleted(const OCRResult& result, const QRect& regionRect, const QPoint& lastHoverPos);
 
     /**
      * @brief OCR识别失败
@@ -106,6 +106,7 @@ private:
         bool valid;
         QImage image;
         QRect regionRect;
+        QPoint lastHoverPos;
 
         PendingRequest() : valid(false) {}
     } m_pending;

@@ -153,8 +153,8 @@ private slots:
 
     void onScrollValueChanged(int value);
 
-    void onOCRHoverTriggered(const QImage& image, const QRect& regionRect);
-    void onOCRCompleted(const OCRResult& result, const QRect& regionRect);
+    void onOCRHoverTriggered(const QImage& image, const QRect& regionRect, const QPoint& lastHoverPos);
+    void onOCRCompleted(const OCRResult& result, const QRect& regionRect, const QPoint& lastHoverPos);
     void onOCRFailed(const QString& error);
     void onLookupRequested(const QString& text);
 

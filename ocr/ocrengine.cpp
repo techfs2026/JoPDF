@@ -287,17 +287,19 @@ OCRResult OCREngine::convertToOCRResult(const RapidOCR::RapidOCROutput& output)
         return result;
     }
 
-    // 合并所有文本
+    // 合并文本 + 计算平均置信度
     QStringList textList;
     float totalScore = 0.0f;
     int validCount = 0;
 
-    for (size_t i = 0; i < output.txts->size(); ++i) {
-        QString txt = QString::fromStdString((*output.txts)[i]).trimmed();
-        if (!txt.isEmpty()) {
-            textList << txt;
-            totalScore += (*output.scores)[i];
-            validCount++;
+    if (output.txts && output.scores) {
+        for (size_t i = 0; i < output.txts->size(); ++i) {
+            QString txt = QString::fromStdString((*output.txts)[i]).trimmed();
+            if (!txt.isEmpty()) {
+                textList << txt;
+                totalScore += (*output.scores)[i];
+                validCount++;
+            }
         }
     }
 
@@ -309,5 +311,28 @@ OCRResult OCREngine::convertToOCRResult(const RapidOCR::RapidOCROutput& output)
         result.success = false;
     }
 
+    // --- 填充详细信息 ---
+    if (output.boxes) {
+        result.boxes = *output.boxes;
+    }
+
+    if (output.txts) {
+        result.texts.clear();
+        for (const auto& t : *output.txts) {
+            result.texts.push_back(t);
+        }
+    }
+
+    if (output.scores) {
+        result.scores.clear();
+        for (const auto& s : *output.scores) {
+            result.scores.push_back(s);
+        }
+    }
+
+    // 耗时
+    result.elapsedTime = output.getElapse();
+
     return result;
 }
+

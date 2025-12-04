@@ -12,6 +12,7 @@
 #include "pdfviewhandler.h"
 #include "linkmanager.h"
 #include "ocrmanager.h"
+#include "chinesetokenizer.h"
 #include "dictionaryconnector.h"
 #include "appconfig.h"
 
@@ -988,7 +989,7 @@ void PDFDocumentTab::setOCRHoverEnabled(bool enabled)
     }
 }
 
-void PDFDocumentTab::onOCRHoverTriggered(const QImage& image, const QRect& regionRect)
+void PDFDocumentTab::onOCRHoverTriggered(const QImage& image, const QRect& regionRect, const QPoint& lastHoverPos)
 {
     if (!m_ocrHoverEnabled) {
         return;
@@ -1004,10 +1005,10 @@ void PDFDocumentTab::onOCRHoverTriggered(const QImage& image, const QRect& regio
     m_lastOCRRegion = regionRect;
 
     // 请求OCR识别
-    OCRManager::instance().requestOCR(image, regionRect);
+    OCRManager::instance().requestOCR(image, regionRect, lastHoverPos);
 }
 
-void PDFDocumentTab::onOCRCompleted(const OCRResult& result, const QRect& regionRect)
+void PDFDocumentTab::onOCRCompleted(const OCRResult& result, const QRect& regionRect, const QPoint& lastHoverPos)
 {
     if (!m_ocrHoverEnabled) {
         return;
@@ -1018,8 +1019,50 @@ void PDFDocumentTab::onOCRCompleted(const OCRResult& result, const QRect& region
         return;
     }
 
+    // 使用分词找到鼠标位置的词
+    QString targetWord = result.text; // 默认使用全部文本
+
+    if (ChineseTokenizer::instance().isInitialized()) {
+        // 分词并找到最接近鼠标的词
+        QVector<TokenWithPosition> tokens =
+            ChineseTokenizer::instance().tokenizeWithPosition(result);
+
+        qDebug() << "onOCRCompleted TokenWithPosition size:" << tokens.size();
+
+        if (!tokens.isEmpty()) {
+            qDebug() << "onOCRCompleted lastHoverPos:" << lastHoverPos;
+            qDebug() << "onOCRCompleted regionRect:" << regionRect;
+
+            // 转换到 regionRect 坐标
+            QPoint posInRegion = lastHoverPos - regionRect.topLeft();
+
+            // 如果有缩放 factor
+            double scale = m_session->state()->currentZoom(); // 1.0 = 100%
+            QPoint posInRegionScaled(posInRegion.x()/scale, posInRegion.y()/scale);
+
+            qDebug() << "posInRegion:" << posInRegion
+                     << "scale:" << scale
+                     << "posInRegionScaled:" << posInRegionScaled;
+
+
+
+            // 3. 查找最近词
+            TokenWithPosition closestToken =
+                ChineseTokenizer::instance().findClosestToken(tokens, posInRegion);
+
+            if (closestToken.isValid()) {
+                targetWord = closestToken.word;
+                qInfo() << "Selected word from OCR result:" << targetWord;
+            }
+        }
+    } else {
+        qWarning() << "ChineseTokenizer not initialized, using full text";
+    }
+
     if (m_ocrFloatingWidget) {
-        m_ocrFloatingWidget->showResult(result.text, result.confidence, regionRect, m_lastOCRImage);
+        // 转换为全局坐标
+        QRect globalRect = regionRect.translated(m_pageWidget->mapToGlobal(QPoint(0, 0)));
+        m_ocrFloatingWidget->showResult(targetWord, result.confidence, globalRect, m_lastOCRImage);
     }
 }
 

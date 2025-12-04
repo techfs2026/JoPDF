@@ -100,8 +100,9 @@ Handler层只负责处理业务，它不持有状态和数据，状态来自Sess
 - OpenCV: 4.12.0
 - onnxruntime: 1.23.2
 - paddleocr: v5模型
-- rapidocr: 3.4.2 (非直接依赖，C++代码实现参考了其Python实现)
+- rapidocr: 3.4.2 (非直接依赖，项目C++代码实现参考了其Python实现)
 - Clipper2: 1.5.4
+- Jieba: 5.6.0
 
 ## 致谢
 
@@ -110,6 +111,7 @@ Handler层只负责处理业务，它不持有状态和数据，状态来自Sess
 - [OpenCV](https://github.com/opencv/opencv)
 - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
 - [RapidOCR](https://github.com/RapidAI/RapidOCR)
+- [Jieba](https://github.com/yanyiwu/cppjieba)
 - PDF Expert - UI 设计灵感来源
 
 ## 联系方式
