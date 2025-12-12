@@ -989,13 +989,33 @@ void PDFDocumentTab::onOCRHoverTriggered(const QImage& image, const QRect& regio
     // 检查OCR是否就绪
     if (!OCRManager::instance().isReady()) {
         qWarning() << "OCR not ready";
+
+        // 显示错误提示
+        if (m_ocrFloatingWidget) {
+            QRect globalRect = regionRect.translated(m_pageWidget->mapToGlobal(QPoint(0, 0)));
+            m_ocrFloatingWidget->showRecognizing(image, globalRect);
+
+            // 延迟更新为错误状态
+            QTimer::singleShot(100, this, [this]() {
+                if (m_ocrFloatingWidget) {
+                    m_ocrFloatingWidget->updateResult(tr("OCR引擎未就绪"), 0.0f);
+                }
+            });
+        }
         return;
     }
 
     m_lastOCRImage = image;
     m_lastOCRRegion = regionRect;
+    m_lastHoverPos = lastHoverPos;
 
-    // 请求OCR识别
+    // 1. 先显示悬浮框和截图,显示"识别中"状态
+    if (m_ocrFloatingWidget) {
+        QRect globalRect = regionRect.translated(m_pageWidget->mapToGlobal(QPoint(0, 0)));
+        m_ocrFloatingWidget->showRecognizing(image, globalRect);
+    }
+
+    // 2. 然后请求OCR识别
     OCRManager::instance().requestOCR(image, regionRect, lastHoverPos);
 }
 
@@ -1007,6 +1027,11 @@ void PDFDocumentTab::onOCRCompleted(const OCRResult& result, const QRect& region
 
     if (!result.success || result.text.isEmpty()) {
         qDebug() << "OCR result empty";
+
+        // 更新为"未识别到文字"
+        if (m_ocrFloatingWidget) {
+            m_ocrFloatingWidget->updateResult(QString(), 0.0f);
+        }
         return;
     }
 
@@ -1021,23 +1046,18 @@ void PDFDocumentTab::onOCRCompleted(const OCRResult& result, const QRect& region
         qDebug() << "onOCRCompleted TokenWithPosition size:" << tokens.size();
 
         if (!tokens.isEmpty()) {
-            qDebug() << "onOCRCompleted lastHoverPos:" << lastHoverPos;
-            qDebug() << "onOCRCompleted regionRect:" << regionRect;
-
             // 转换到 regionRect 坐标
             QPoint posInRegion = lastHoverPos - regionRect.topLeft();
 
             // 如果有缩放 factor
-            double scale = m_session->state()->currentZoom(); // 1.0 = 100%
+            double scale = m_session->state()->currentZoom();
             QPoint posInRegionScaled(posInRegion.x()/scale, posInRegion.y()/scale);
 
             qDebug() << "posInRegion:" << posInRegion
                      << "scale:" << scale
                      << "posInRegionScaled:" << posInRegionScaled;
 
-
-
-            // 3. 查找最近词
+            // 查找最近词
             TokenWithPosition closestToken =
                 ChineseTokenizer::instance().findClosestToken(tokens, posInRegion);
 
@@ -1050,10 +1070,9 @@ void PDFDocumentTab::onOCRCompleted(const OCRResult& result, const QRect& region
         qWarning() << "ChineseTokenizer not initialized, using full text";
     }
 
+    // 更新悬浮框结果
     if (m_ocrFloatingWidget) {
-        // 转换为全局坐标
-        QRect globalRect = regionRect.translated(m_pageWidget->mapToGlobal(QPoint(0, 0)));
-        m_ocrFloatingWidget->showResult(targetWord, result.confidence, globalRect, m_lastOCRImage);
+        m_ocrFloatingWidget->updateResult(targetWord, result.confidence);
     }
 }
 
@@ -1064,8 +1083,21 @@ void PDFDocumentTab::onOCRFailed(const QString& error)
     }
 
     qWarning() << "OCR failed:" << error;
-    // 可选：显示错误提示
-    // QToolTip::showText(QCursor::pos(), tr("识别失败: %1").arg(error));
+
+    // 更新悬浮框显示错误
+    if (m_ocrFloatingWidget) {
+        m_ocrFloatingWidget->updateResult(tr("识别失败: %1").arg(error), 0.0f);
+    }
+}
+
+void PDFDocumentTab::triggerOCRAtCurrentPosition()
+{
+    if (!m_pageWidget) {
+        return;
+    }
+
+    // 委托给PageWidget处理
+    m_pageWidget->triggerOCRAtCurrentPosition();
 }
 
 void PDFDocumentTab::onLookupRequested(const QString& text)

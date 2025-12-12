@@ -81,6 +81,7 @@ private slots:
     void toggleOCRHover();
     void onOCREngineStateChanged(OCREngineState state);
     void onOCRHoverEnabledChanged(bool enabled);
+    void triggerOCRAtCurrentPosition();
 
 private:
     void createMenuBar();

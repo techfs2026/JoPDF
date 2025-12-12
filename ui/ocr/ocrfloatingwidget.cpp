@@ -27,6 +27,7 @@ void OCRFloatingWidget::setupUI()
     mainLayout->setContentsMargins(12, 12, 12, 12);
     mainLayout->setSpacing(8);
 
+    // 图片标签
     m_imageLabel = new QLabel(this);
     m_imageLabel->setAlignment(Qt::AlignCenter);
     m_imageLabel->setStyleSheet(
@@ -40,6 +41,21 @@ void OCRFloatingWidget::setupUI()
     m_imageLabel->setMaximumSize(300, 200);
     m_imageLabel->setScaledContents(false);
     mainLayout->addWidget(m_imageLabel);
+
+    // 状态标签(新增)
+    m_statusLabel = new QLabel(this);
+    m_statusLabel->setWordWrap(true);
+    m_statusLabel->setAlignment(Qt::AlignCenter);
+    m_statusLabel->setStyleSheet(
+        "QLabel {"
+        "  color: #666666;"
+        "  font-size: 12px;"
+        "  font-style: italic;"
+        "  padding: 4px;"
+        "}"
+        );
+    m_statusLabel->hide();
+    mainLayout->addWidget(m_statusLabel);
 
     // 文字标签
     m_textLabel = new QLabel(this);
@@ -85,6 +101,10 @@ void OCRFloatingWidget::setupUI()
         "QPushButton:pressed {"
         "  background-color: #004578;"
         "}"
+        "QPushButton:disabled {"
+        "  background-color: #cccccc;"
+        "  color: #888888;"
+        "}"
         );
     connect(m_lookupButton, &QPushButton::clicked,
             this, [this]() {
@@ -113,49 +133,46 @@ void OCRFloatingWidget::setupUI()
 
     buttonLayout->addStretch();
     mainLayout->addLayout(buttonLayout);
+
+    m_isRecognizing = false;
 }
-
-void OCRFloatingWidget::showResult(const QString& text, float confidence, const QRect& regionRect)
-{
-    m_currentText = text;
-
-    // 隐藏图片
-    m_imageLabel->hide();
-
-    m_textLabel->setText(text);
-    m_confidenceLabel->setText(tr("置信度: %1%").arg(qRound(confidence * 100)));
-
-    adjustSize();
-    positionWidget(regionRect);
-    show();
-    raise();
-    activateWindow();
-}
-
 
 void OCRFloatingWidget::showResult(const QString& text, float confidence, const QRect& regionRect, const QImage& sourceImage)
 {
     m_currentText = text;
+    m_isRecognizing = false;
 
     // 显示原始识别图片
     if (!sourceImage.isNull()) {
-        // 缩放图片以适应标签大小
         QPixmap pixmap = QPixmap::fromImage(sourceImage);
-
-        // 保持宽高比缩放
         QSize labelSize = m_imageLabel->maximumSize();
         if (pixmap.width() > labelSize.width() || pixmap.height() > labelSize.height()) {
             pixmap = pixmap.scaled(labelSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         }
-
         m_imageLabel->setPixmap(pixmap);
         m_imageLabel->show();
     } else {
         m_imageLabel->hide();
     }
 
+    // 隐藏状态标签
+    m_statusLabel->hide();
+
+    // 显示结果
     m_textLabel->setText(text);
+    m_textLabel->setStyleSheet(
+        "QLabel {"
+        "  color: #333333;"
+        "  font-size: 14px;"
+        "  padding: 4px;"
+        "}"
+        );
+    m_textLabel->show();
+
     m_confidenceLabel->setText(tr("置信度: %1%").arg(qRound(confidence * 100)));
+    m_confidenceLabel->show();
+
+    m_lookupButton->setEnabled(!text.isEmpty());
 
     adjustSize();
     positionWidget(regionRect);
@@ -170,6 +187,8 @@ void OCRFloatingWidget::hideFloating()
     m_currentText.clear();
     m_imageLabel->clear();
     m_imageLabel->hide();
+    m_statusLabel->hide();
+    m_isRecognizing = false;
 }
 
 void OCRFloatingWidget::positionWidget(const QRect& regionRect)
@@ -240,4 +259,83 @@ bool OCRFloatingWidget::eventFilter(QObject* obj, QEvent* event)
     }
 
     return QWidget::eventFilter(obj, event);
+}
+
+void OCRFloatingWidget::showRecognizing(const QImage& sourceImage, const QRect& regionRect)
+{
+    m_currentText.clear();
+    m_isRecognizing = true;
+
+    // 显示截图
+    if (!sourceImage.isNull()) {
+        QPixmap pixmap = QPixmap::fromImage(sourceImage);
+        QSize labelSize = m_imageLabel->maximumSize();
+        if (pixmap.width() > labelSize.width() || pixmap.height() > labelSize.height()) {
+            pixmap = pixmap.scaled(labelSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        }
+        m_imageLabel->setPixmap(pixmap);
+        m_imageLabel->show();
+    }
+
+    // 显示"识别中"状态
+    m_statusLabel->setText(tr("🔍 正在识别中..."));
+    m_statusLabel->show();
+
+    // 隐藏文本和置信度
+    m_textLabel->hide();
+    m_confidenceLabel->hide();
+
+    // 禁用查词按钮
+    m_lookupButton->setEnabled(false);
+
+    adjustSize();
+    positionWidget(regionRect);
+    show();
+    raise();
+    activateWindow();
+}
+
+void OCRFloatingWidget::updateResult(const QString& text, float confidence)
+{
+    if (!m_isRecognizing) {
+        return;
+    }
+
+    m_isRecognizing = false;
+    m_currentText = text;
+
+    // 隐藏状态标签
+    m_statusLabel->hide();
+
+    if (text.isEmpty()) {
+        // 识别失败
+        m_textLabel->setText(tr("未识别到文字"));
+        m_textLabel->setStyleSheet(
+            "QLabel {"
+            "  color: #999999;"
+            "  font-size: 14px;"
+            "  font-style: italic;"
+            "  padding: 4px;"
+            "}"
+            );
+        m_confidenceLabel->hide();
+        m_lookupButton->setEnabled(false);
+    } else {
+        // 识别成功
+        m_textLabel->setText(text);
+        m_textLabel->setStyleSheet(
+            "QLabel {"
+            "  color: #333333;"
+            "  font-size: 14px;"
+            "  padding: 4px;"
+            "}"
+            );
+        m_confidenceLabel->setText(tr("置信度: %1%").arg(qRound(confidence * 100)));
+        m_confidenceLabel->show();
+        m_lookupButton->setEnabled(true);
+    }
+
+    m_textLabel->show();
+
+    adjustSize();
 }

@@ -477,7 +477,7 @@ void PDFPageWidget::triggerOCRAtCurrentPosition()
     }
 
     if (!m_ocrHoverEnabled) {
-        qDebug() << "OCR hover not enabled";
+        qDebug() << "OCR hover not enabled in widget";
         return;
     }
 
@@ -487,49 +487,47 @@ void PDFPageWidget::triggerOCRAtCurrentPosition()
         return;
     }
 
+    // 使用上次记录的鼠标位置
+    // 如果没有记录,使用widget中心点
+    QPoint hoverPos = m_lastHoverPos;
+    if (hoverPos.isNull() || !rect().contains(hoverPos)) {
+        // 使用当前鼠标位置
+        hoverPos = mapFromGlobal(QCursor::pos());
+
+        // 如果鼠标不在widget上,使用widget中心
+        if (!rect().contains(hoverPos)) {
+            hoverPos = rect().center();
+        }
+    }
+
     // 检查是否在页面上
     int pageX, pageY;
-    int pageIndex = getPageAtPos(m_lastHoverPos, &pageX, &pageY);
+    int pageIndex = getPageAtPos(hoverPos, &pageX, &pageY);
 
     if (pageIndex < 0) {
-        qDebug() << "Mouse not on any page";
+        qDebug() << "Position not on any page:" << hoverPos;
         return;
     }
 
-    // 提取悬停区域的图像
-    QImage image = extractHoverRegion(m_lastHoverPos);
+    // 提取悬浮区域的图像
+    QImage image = extractHoverRegion(hoverPos);
     if (!image.isNull()) {
-        QRect regionRect = calculateHoverRect(m_lastHoverPos);
-        qInfo() << "Manual OCR triggered at position:" << m_lastHoverPos;
-        emit ocrHoverTriggered(image, regionRect, m_lastHoverPos);
+        QRect regionRect = calculateHoverRect(hoverPos);
+        qInfo() << "Manual OCR triggered at position:" << hoverPos;
+        emit ocrHoverTriggered(image, regionRect, hoverPos);
     } else {
         qDebug() << "Failed to extract hover region";
     }
 }
 
-void PDFPageWidget::keyPressEvent(QKeyEvent* event)
-{
-    // 检查是否按下Ctrl+Q
-    if (m_ocrHoverEnabled &&
-        event->key() == Qt::Key_Q &&
-        event->modifiers() == Qt::ControlModifier) {
-
-        triggerOCRAtCurrentPosition();
-        event->accept();
-        return;
-    }
-
-    QWidget::keyPressEvent(event);
-}
-
-
 void PDFPageWidget::mouseMoveEvent(QMouseEvent* event)
 {
-    // 始终更新鼠标位置（用于快捷键触发OCR）
+    // 始终更新鼠标位置(用于快捷键触发OCR)
     m_lastHoverPos = event->pos();
 
-    // OCR模式下不需要定时器，只记录位置
+    // OCR模式下不需要定时器,只记录位置
     if (m_ocrHoverEnabled) {
+        // 可以在这里更新光标样式
         event->accept();
         return;
     }
@@ -550,7 +548,7 @@ void PDFPageWidget::mouseMoveEvent(QMouseEvent* event)
         return;
     }
 
-    // 普通移动：检测页面和链接
+    // 普通移动:检测页面和链接
     int pageX, pageY;
     int pageIndex = getPageAtPos(event->pos(), &pageX, &pageY);
 
@@ -636,12 +634,14 @@ void PDFPageWidget::setOCRHoverEnabled(bool enabled)
         setCursor(Qt::CrossCursor);
     } else {
         const PDFDocumentState* state = m_session->state();
-        if (state->isTextPDF()) {
+        if (state && state->isTextPDF()) {
             setCursor(Qt::IBeamCursor);
         } else {
             setCursor(Qt::ArrowCursor);
         }
     }
+
+    qInfo() << "OCR hover enabled changed to:" << enabled;
 }
 
 QImage PDFPageWidget::extractHoverRegion(const QPoint& pos)

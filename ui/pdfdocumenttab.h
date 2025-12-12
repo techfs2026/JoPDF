@@ -118,6 +118,7 @@ public:
     // OCR
     bool isOCRHoverEnabled() const { return OCRManager::instance().isOCRHoverEnabled(); }
     void updateOCRHoverState();
+    void triggerOCRAtCurrentPosition();
 
 signals:
 
@@ -206,6 +207,7 @@ private:
     OCRFloatingWidget* m_ocrFloatingWidget;  // OCR浮层
     QImage m_lastOCRImage;
     QRect m_lastOCRRegion;
+    QPoint m_lastHoverPos;
 };
 
 #endif // PDFDOCUMENTTAB_H
