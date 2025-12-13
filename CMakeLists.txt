@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Qt installation path
-set(CMAKE_PREFIX_PATH "D:/Qt6/6.10.0/msvc2022_64")
+set(CMAKE_PREFIX_PATH "D:/Qt6/6.8.3/msvc2022_64")
 
 # Install output directory
 set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/deploy")
