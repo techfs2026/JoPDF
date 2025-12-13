@@ -39,6 +39,11 @@ public:
      */
     bool initialize(const QString& modelDir);
 
+
+    void shutdown();
+
+    bool isEngineRunning() const;
+
     /**
      * @brief 检查是否已就绪
      */

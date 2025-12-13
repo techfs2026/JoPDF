@@ -49,6 +49,41 @@ bool OCRManager::initialize(const QString& modelDir)
     return m_engine->initializeAsync(modelDir);
 }
 
+void OCRManager::shutdown()
+{
+    qInfo() << "OCRManager: Shutting down...";
+
+    // 1. 先禁用OCR功能
+    if (m_ocrHoverEnabled) {
+        setOCRHoverEnabled(false);
+    }
+
+    // 2. 取消待处理的请求
+    cancelPending();
+
+    // 3. 清理引擎
+    if (m_engine) {
+        // 断开信号连接
+        disconnect(m_engine.get(), nullptr, this, nullptr);
+
+        // 释放引擎
+        m_engine.reset();
+        m_engine = nullptr;
+
+        qInfo() << "OCRManager: Engine released";
+    }
+
+    // 4. 发出状态变化信号
+    emit engineStateChanged(OCREngineState::Uninitialized);
+
+    qInfo() << "OCRManager: Shutdown complete";
+}
+
+bool OCRManager::isEngineRunning() const
+{
+    return m_engine != nullptr;
+}
+
 bool OCRManager::isReady() const
 {
     return m_engine && m_engine->state() == OCREngineState::Ready;

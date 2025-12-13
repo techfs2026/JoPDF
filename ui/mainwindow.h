@@ -3,6 +3,7 @@
 
 #include <QMainWindow>
 #include <QTimer>
+#include <QPushButton>
 #include "ocrengine.h"
 #include "datastructure.h"
 
@@ -107,8 +108,11 @@ private:
     // 样式
     void applyModernStyle();
 
+    void initOCREngine();
+    void shutdownOCREngine();
+    QString getEngineStateText(OCREngineState state) const;
+
 private:
-    void initializeOCRManager();
 
     // UI组件
     QTabWidget* m_tabWidget;

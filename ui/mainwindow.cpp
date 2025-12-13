@@ -79,9 +79,12 @@ MainWindow::MainWindow(QWidget* parent)
 
 MainWindow::~MainWindow()
 {
-    // 关闭所有标签页
     while (m_tabWidget->count() > 0) {
         closeTab(0);
+    }
+
+    if (m_ocrInitialized) {
+        OCRManager::instance().shutdown();
     }
 }
 
@@ -898,41 +901,14 @@ void MainWindow::createStatusBar()
     m_zoomLabel->setAlignment(Qt::AlignCenter);
     statusBar()->addPermanentWidget(m_zoomLabel);
 
-    // 在右下角添加OCR状态指示器
     m_ocrIndicator = new OCRStatusIndicator(this);
     statusBar()->addPermanentWidget(m_ocrIndicator);
+    m_ocrIndicator->setState(OCREngineState::Uninitialized);
 
-    // 双击指示器可以查看详细信息
-    connect(m_ocrIndicator, &OCRStatusIndicator::doubleClicked,
-            this, [this]() {
-                QString message;
-                OCREngineState state = OCRManager::instance().engineState();
-
-                switch (state) {
-                case OCREngineState::Uninitialized:
-                    message = tr("OCR功能未初始化\n\n"
-                                 "首次使用时会自动加载模型，请稍候。");
-                    break;
-                case OCREngineState::Loading:
-                    message = tr("OCR模型正在加载中...\n\n"
-                                 "这可能需要几秒钟时间。");
-                    break;
-                case OCREngineState::Ready:
-                    message = tr("OCR功能已就绪\n\n"
-                                 "您可以在扫描版PDF上使用悬停取词功能。");
-                    break;
-                case OCREngineState::Error:
-                    message = tr("OCR初始化失败\n\n"
-                                 "错误: %1\n\n"
-                                 "请检查模型文件是否存在。")
-                                  .arg(OCRManager::instance().lastError());
-                    break;
-                }
-
-                QMessageBox::information(this, tr("OCR状态"), message);
-            });
-
-    // 连接OCR状态变化
+    connect(m_ocrIndicator, &OCRStatusIndicator::engineStartRequested,
+            this, &MainWindow::initOCREngine);
+    connect(m_ocrIndicator, &OCRStatusIndicator::engineStopRequested,
+            this, &MainWindow::shutdownOCREngine);
     connect(&OCRManager::instance(), &OCRManager::engineStateChanged,
             this, &MainWindow::onOCREngineStateChanged);
 
@@ -996,7 +972,6 @@ void MainWindow::updateUIState()
     PageDisplayMode displayMode = hasDocument ? tab->displayMode() : PageDisplayMode::SinglePage;
     ZoomMode zoomMode = hasDocument ? tab->zoomMode() : ZoomMode::FitWidth;
     bool canEnhance = hasDocument && !tab->isTextPDF();
-    bool canOCR = hasDocument && !tab->isTextPDF();
 
     // 文件操作
     m_closeAction->setEnabled(hasDocument);
@@ -1058,34 +1033,50 @@ void MainWindow::updateUIState()
         }
     }
 
-    // OCR 悬浮取词按钮 - 不再检查文档状态
-    bool ocrReady = (OCRManager::instance().engineState() == OCREngineState::Ready);
-    // OCR功能始终可用,但显示不同的提示
-    m_ocrHoverAction->setEnabled(true);
-    if (!ocrReady) {
-        OCREngineState state = OCRManager::instance().engineState();
-        if (state == OCREngineState::Loading) {
-            m_ocrHoverAction->setToolTip(tr("OCR取词 (Ctrl+Shift+O)\n(OCR引擎加载中...)"));
-        } else if (state == OCREngineState::Error) {
-            m_ocrHoverAction->setToolTip(tr("OCR取词 (Ctrl+Shift+O)\n(OCR引擎初始化失败)"));
-        } else {
-            m_ocrHoverAction->setToolTip(tr("OCR取词 (Ctrl+Shift+O)\n(OCR引擎未就绪)"));
-        }
-    } else {
-        if (!hasDocument) {
-            m_ocrHoverAction->setToolTip(tr("OCR取词 (Ctrl+Shift+O)\n按 Ctrl+Q 触发识别\n(需要先打开文档)"));
-        } else {
-            if (tab->isTextPDF()) {
-                m_ocrHoverAction->setToolTip(tr("OCR取词 (Ctrl+Shift+O)\n按 Ctrl+Q 触发识别\n(当前是文本PDF,不需要OCR)"));
+    if (m_ocrHoverAction) {
+        OCREngineState engineState = OCRManager::instance().engineState();
+        bool ocrReady = (engineState == OCREngineState::Ready);
+
+        // 构建提示文本
+        QString tooltip;
+        bool shouldEnable = false;
+
+        if (!m_ocrInitialized) {
+            tooltip = tr("启用OCR取词 (Ctrl+Shift+O)\n"
+                         "⚠ 请先在状态栏启动OCR引擎");
+            shouldEnable = false;
+        } else if (engineState == OCREngineState::Loading) {
+            tooltip = tr("启用OCR取词 (Ctrl+Shift+O)\n"
+                         "⏳ OCR引擎加载中，请稍候...");
+            shouldEnable = false;
+        } else if (engineState == OCREngineState::Error) {
+            tooltip = tr("启用OCR取词 (Ctrl+Shift+O)\n"
+                         "❌ OCR引擎初始化失败");
+            shouldEnable = false;
+        } else if (ocrReady) {
+            shouldEnable = true;
+            if (!hasDocument) {
+                tooltip = tr("启用OCR取词 (Ctrl+Shift+O)\n"
+                             "按 Ctrl+Q 触发识别\n"
+                             "⚠ 需要先打开文档");
+            } else if (tab->isTextPDF()) {
+                tooltip = tr("启用OCR取词 (Ctrl+Shift+O)\n"
+                             "按 Ctrl+Q 触发识别\n"
+                             "💡 当前是文本PDF，不需要OCR");
             } else {
-                m_ocrHoverAction->setToolTip(tr("启用OCR取词模式 (Ctrl+Shift+O)\n"
-                                                "启用后按 Ctrl+Q 触发识别\n"
-                                                "(仅扫描版PDF)"));
+                tooltip = tr("启用OCR取词 (Ctrl+Shift+O)\n"
+                             "按 Ctrl+Q 触发识别\n"
+                             "✓ 点击启用OCR取词功能");
             }
         }
+
+        m_ocrHoverAction->setEnabled(shouldEnable);
+        m_ocrHoverAction->setToolTip(tooltip);
+
+        // 同步勾选状态
+        bool shouldCheck = ocrReady && OCRManager::instance().isOCRHoverEnabled();
+        m_ocrHoverAction->setChecked(shouldCheck);
     }
-    // 同步勾选状态
-    m_ocrHoverAction->setChecked(ocrReady && OCRManager::instance().isOCRHoverEnabled());
 
     // 导航面板
     m_showNavigationAction->setEnabled(hasDocument);
@@ -1235,21 +1226,77 @@ void MainWindow::togglePaperEffect()
     tab->setPaperEffectEnabled(enabled);
 }
 
+QString MainWindow::getEngineStateText(OCREngineState state) const
+{
+    switch (state) {
+    case OCREngineState::Uninitialized:
+        return tr("未初始化");
+    case OCREngineState::Loading:
+        return tr("加载中");
+    case OCREngineState::Ready:
+        return tr("就绪");
+    case OCREngineState::Error:
+        return tr("错误");
+    default:
+        return tr("未知状态");
+    }
+}
+
 void MainWindow::toggleOCRHover()
 {
-    bool enabled = m_ocrHoverAction->isChecked();
+    bool wantEnable = m_ocrHoverAction->isChecked();
 
-    // 首次启用时初始化OCR
-    if (enabled && !m_ocrInitialized) {
-        initializeOCRManager();
-        return;
-    }
+    // 检查引擎是否就绪
+    OCREngineState state = OCRManager::instance().engineState();
 
-    // 使用全局OCRManager设置状态
-    OCRManager::instance().setOCRHoverEnabled(enabled);
+    if (wantEnable) {
+        // 要启用功能，先检查引擎状态
+        if (!m_ocrInitialized) {
+            // 引擎未初始化，提示用户先启动引擎
+            QMessageBox::information(this, tr("OCR功能"),
+                                     tr("请先在状态栏启动OCR引擎！\n\n"
+                                        "点击状态栏右侧的 [OCR引擎] 按钮即可启动引擎。"));
+            m_ocrHoverAction->setChecked(false);
+            return;
+        }
 
-    // 显示使用提示
-    if (enabled) {
+        if (state == OCREngineState::Loading) {
+            // 引擎加载中
+            QMessageBox::information(this, tr("OCR功能"),
+                                     tr("OCR引擎正在加载中...\n\n"
+                                        "请等待引擎加载完成（状态栏指示器变为绿色）后再启用功能。"));
+            m_ocrHoverAction->setChecked(false);
+            return;
+        }
+
+        if (state == OCREngineState::Error) {
+            // 引擎加载失败
+            QMessageBox::warning(this, tr("OCR功能"),
+                                 tr("OCR引擎初始化失败！\n\n"
+                                    "错误信息: %1\n\n"
+                                    "请尝试:\n"
+                                    "1. 重新启动OCR引擎\n"
+                                    "2. 检查模型文件完整性\n"
+                                    "3. 查看日志获取详细错误信息")
+                                     .arg(OCRManager::instance().lastError()));
+            m_ocrHoverAction->setChecked(false);
+            return;
+        }
+
+        if (state != OCREngineState::Ready) {
+            // 其他未就绪状态
+            QMessageBox::information(this, tr("OCR功能"),
+                                     tr("OCR引擎尚未就绪，无法启用功能。\n\n"
+                                        "当前状态: %1")
+                                         .arg(getEngineStateText(state)));
+            m_ocrHoverAction->setChecked(false);
+            return;
+        }
+
+        // 引擎就绪，可以启用功能
+        OCRManager::instance().setOCRHoverEnabled(true);
+
+        // 显示使用说明
         QMessageBox::information(this, tr("OCR取词已启用"),
                                  tr("OCR悬浮取词已启用!\n\n"
                                     "使用方法:\n"
@@ -1259,26 +1306,35 @@ void MainWindow::toggleOCRHover()
                                     "4. 点击浮窗可查询词典\n"
                                     "5. 再次点击工具栏按钮可关闭OCR\n\n"
                                     "提示: 可在状态栏查看OCR引擎状态"));
+    } else {
+        // 关闭功能
+        OCRManager::instance().setOCRHoverEnabled(false);
     }
 }
 
-void MainWindow::initializeOCRManager()
+void MainWindow::initOCREngine()
 {
     if (m_ocrInitialized) {
+        qInfo() << "OCR引擎已经初始化";
         return;
     }
 
     QString modelDir = AppConfig::instance().ocrModelDir();
     QString dictDir = AppConfig::instance().jiebaDictDir();
 
-    qInfo() << "MainWindow: Initializing OCR with model dir:" << modelDir;
-    qInfo() << "MainWindow: Initializing Jieba with dict dir:" << dictDir;
+    qInfo() << "MainWindow: 正在启动OCR引擎...";
+    qInfo() << "模型目录:" << modelDir;
+    qInfo() << "词典目录:" << dictDir;
+
+    // 先更新UI状态为"正在启动"
+    m_ocrIndicator->setEngineRunning(true);
+    m_ocrIndicator->setState(OCREngineState::Loading);
 
     // 初始化分词器
     if (!ChineseTokenizer::instance().isInitialized()) {
         bool jiebaOk = ChineseTokenizer::instance().initialize(dictDir);
         if (!jiebaOk) {
-            qWarning() << "Failed to initialize Jieba:"
+            qWarning() << "分词器初始化失败:"
                        << ChineseTokenizer::instance().lastError();
             QMessageBox::warning(this, tr("分词器初始化失败"),
                                  tr("中文分词功能初始化失败:\n%1\n\nOCR识别将使用全部文本。")
@@ -1286,22 +1342,94 @@ void MainWindow::initializeOCRManager()
         }
     }
 
-    // 初始化OCR
+    // 初始化OCR引擎
     bool started = OCRManager::instance().initialize(modelDir);
 
     if (started) {
         m_ocrInitialized = true;
-        qInfo() << "MainWindow: OCR initialization started";
+        qInfo() << "OCR引擎启动中...";
+
+        // 显示启动提示（可选，也可以去掉）
+        statusBar()->showMessage(tr("OCR引擎正在后台加载中..."), 3000);
     } else {
-        qWarning() << "MainWindow: Failed to start OCR initialization";
+        qWarning() << "OCR引擎启动失败";
+
+        // 恢复未启动状态
+        m_ocrIndicator->setEngineRunning(false);
+        m_ocrIndicator->setState(OCREngineState::Error);
+
+        QMessageBox::critical(this, tr("OCR引擎启动失败"),
+                              tr("无法启动OCR引擎，请检查:\n"
+                                 "1. 模型文件是否存在\n"
+                                 "2. 模型路径配置是否正确\n"
+                                 "3. 系统资源是否充足\n\n"
+                                 "模型目录: %1").arg(modelDir));
+
+        m_ocrInitialized = false;
     }
+
+    updateUIState();
 }
 
+void MainWindow::shutdownOCREngine()
+{
+    if (!m_ocrInitialized) {
+        return;
+    }
+
+    // 确认对话框
+    QMessageBox::StandardButton reply = QMessageBox::question(
+        this,
+        tr("停止OCR引擎"),
+        tr("确定要停止OCR引擎吗？\n\nOCR取词功能将同时被关闭。"),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No
+        );
+
+    if (reply != QMessageBox::Yes) {
+        return;
+    }
+
+    // 先关闭OCR功能
+    if (OCRManager::instance().isOCRHoverEnabled()) {
+        OCRManager::instance().setOCRHoverEnabled(false);
+        if (m_ocrHoverAction) {
+            m_ocrHoverAction->setChecked(false);
+        }
+    }
+
+    // 停止引擎
+    OCRManager::instance().shutdown();
+    m_ocrInitialized = false;
+
+    // 更新指示器状态
+    m_ocrIndicator->setEngineRunning(false);
+    m_ocrIndicator->setState(OCREngineState::Uninitialized);
+
+    qInfo() << "OCR引擎已停止";
+    statusBar()->showMessage(tr("OCR引擎已停止"), 2000);
+
+    updateUIState();
+}
 void MainWindow::onOCREngineStateChanged(OCREngineState state)
 {
     // 更新状态指示器
     if (m_ocrIndicator) {
         m_ocrIndicator->setState(state);
+
+        // 根据状态更新运行标志
+        if (state == OCREngineState::Uninitialized) {
+            m_ocrIndicator->setEngineRunning(false);
+        } else {
+            m_ocrIndicator->setEngineRunning(true);
+        }
+    }
+
+    // 显示状态变化消息
+    if (state == OCREngineState::Ready) {
+        statusBar()->showMessage(tr("OCR引擎已就绪，可在工具栏启用OCR取词功能"), 3000);
+    } else if (state == OCREngineState::Error) {
+        statusBar()->showMessage(tr("OCR引擎初始化失败"), 5000);
     }
 
     updateUIState();
